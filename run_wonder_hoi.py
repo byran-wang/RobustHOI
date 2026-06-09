@@ -158,6 +158,7 @@ class run_wonder_hoi:
                 "bundle_sdf_eval_vis": self.bundle_sdf_eval_vis,
                 "hold_eval_vis": self.hold_eval_vis,
                 "gt_eval_vis": self.gt_eval_vis,
+                "ablation_comapre": self.ablation_comapre,
             },
         }
 
@@ -2669,6 +2670,45 @@ class run_wonder_hoi:
         print(cmd)
         os.system(cmd)
 
+    def ablation_comapre(self, scene_name, **kwargs):
+        self.print_header(f"baseline compare for {scene_name}")
+
+        output_dirs = kwargs.get("output_dirs", [
+            f"{vggt_code_dir}/output[4_25_11_09][879f][sam3d_auto_selection]",
+            f"{vggt_code_dir}/output[5_3_16_00][fb2b208][Ablation][no_rectified_by_hand]",
+            f"{vggt_code_dir}/output[4_30_21_36][f00feea][Ablation][Only_PnP]",
+            f"{vggt_code_dir}/output[5_1_8_39][3c57beb][Ablation][SAM3D+FP+BA]",
+            f"{vggt_code_dir}/output[5_1_22_17][c270f69][Ablation][PnP+Neus+BA]",
+            f"{vggt_code_dir}/output[4_29_9_14][e781969][Ablation][no_depth_filter]",
+        ])
+        captions = kwargs.get("captions", [
+            "Full Pipeline",
+            "w/o Hand Rectif.",
+            "Only PnP",
+            "SAM3D+FP+BA",
+            "PnP+NeuS+BA",
+            "w/o Depth Filter",
+        ])
+        gt_dir = kwargs.get("gt_dir", f"{vggt_code_dir}/output_baseline/{scene_name}/gt")
+        out_path = kwargs.get("out_path", f"{vggt_code_dir}/output_ablation/ablation_compare_{scene_name}.mp4")
+
+        if self.rebuild and os.path.exists(out_path):
+            os.remove(out_path)
+
+        output_dirs_str = " ".join(f"'{d}'" for d in output_dirs)
+        captions_str = " ".join(f"'{c}'" for c in captions)
+
+        cmd = f"cd {vggt_code_dir} && "
+        cmd += f"{self.conda_dir}/envs/vggsfm_tmp/bin/python ablation_comapre.py "
+        cmd += f"--seq {scene_name} "
+        cmd += f"--output_dirs {output_dirs_str} "
+        cmd += f"--captions {captions_str} "
+        cmd += f"--gt_dir '{gt_dir}' "
+        cmd += f"--out_path '{out_path}' "
+
+        print(cmd)
+        os.system(cmd)
+
 def main(args, extras):
     # Convert extras list to dictionary
     extras_dict = {}
@@ -2707,7 +2747,7 @@ if __name__ == "__main__":
                 "hand_pose_preprocess",
                 "hand_pose_postprocess",
                 "baseline",
-                ], 
+                ],
         help="Specify the execution option.", 
         nargs='+',  # To accept multiple values in a list
         required=False  # This makes the argument mandatory
@@ -2826,6 +2866,7 @@ if __name__ == "__main__":
                 "bundle_sdf_eval_vis",
                 "hold_eval_vis",
                 "gt_eval_vis",
+                "ablation_comapre",
                 ],
         help="Specify the process option.", 
         nargs='+',  # To accept multiple values in a list
