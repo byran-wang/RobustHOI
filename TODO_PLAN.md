@@ -124,3 +124,21 @@ Host 3090_server1
 - [x] rsync `3090_server1:/data1/shibo/Documents/project/vggt_in_the_wild/output[4_23_10_47][98c8404][3D_points_as_best_pose_reference]/metrics_summary/*.mp4` to `/media/simba/9d6027d0-f312-476a-ae5d-6b72a540d4ec/simba4090/simba/Documents/robust_hoi_results/zed_wenxuan/output[4_23_10_47][98c8404][3D_points_as_best_pose_reference]/metrics_summary/` 
 - [x] rsync `3090_server1:/data1/shibo/Documents/project/vggt_in_the_wild/output/metrics_summary/*.mp4` to `/media/simba/9d6027d0-f312-476a-ae5d-6b72a540d4ec/simba4090/simba/Documents/robust_hoi_results/zed_wenxuan/output[4_24_09_07][6154494][lambda_depth 0.2]/metrics_summary/` 
 - [x] rsync all the SAM3D directory in /mnt/sata/Documents/dataset/BundleSDF/HO3D_v3/train/*/ to `3090_server1:/data1/shibo/Documents/dataset/BundleSDF/HO3D_v3/train/*/'
+- [x]  compare the results of output[4_25_11_09][879f][sam3d_auto_selection]/metrics_summary/eval.txt and
+  output[5_3_16_00][fb2b208][Ablation][no_rectified_by_hand]/metrics_summary/eval.txt. sort by the add_auc delta
+
+- [x]  compare the results of output[4_25_11_09][879f][sam3d_auto_selection]/metrics_summary/eval.txt and                     
+  output[4_30_21_36][f00feea][Ablation][Only_PnP]/metrics_summary/eval.txt. sort by the add_auc delta
+  
+- [x]  compare the results of output[4_25_11_09][879f][sam3d_auto_selection]/metrics_summary/eval.txt and                     
+  output[5_1_8_39][3c57beb][Ablation][SAM3D+FP+BA]/metrics_summary/eval.txt. sort by the add_auc delta
+
+- [x]  compare the results of output[4_25_11_09][879f][sam3d_auto_selection]/metrics_summary/eval.txt and                     
+  output[5_1_22_17][c270f69][Ablation][PnP+Neus+BA]/metrics_summary/eval.txt. sort by the add_auc delta  
+
+- [x]  compare the results of output[4_25_11_09][879f][sam3d_auto_selection]/metrics_summary/eval.txt and                     
+  output[4_29_9_14][e781969][Ablation][no_depth_filter]/metrics_summary/eval.txt. sort by the add_auc delta  
+
+- [x] summarize all the comaprison results to the ablation.md
+- [x] merge all the eval_sum_${sequence_name}.mp4 for these 5 baselines and gt_overlay.mp4 in output_baseline  to merged_eval_sum_${sequence_name}.mp4 in output_ablation/ for the sequences of GSF12, MDF12 and BB12
+- [x] merge all the ${sequence_name}/pipeline_joint_opt/eval_vis/nvdiffrast_overlay.mp4 for these 5 baselines and gt_overlay.mp4 in output_baseline  to output_ablation/ablation_compare_${sequence_name}.mp4 in  for the sequences of GSF12, MDF12 and BB12. Add the baseline caption above the ablation_compare_${sequence_name}.mp4. And write the merging script to baseline_compare.py, and integrate it to @run_wonder_hoi.py and @run_wonder_hoi.sh
