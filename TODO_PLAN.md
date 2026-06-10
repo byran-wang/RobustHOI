@@ -142,3 +142,9 @@ Host 3090_server1
 - [x] summarize all the comaprison results to the ablation.md
 - [x] merge all the eval_sum_${sequence_name}.mp4 for these 5 baselines and gt_overlay.mp4 in output_baseline  to merged_eval_sum_${sequence_name}.mp4 in output_ablation/ for the sequences of GSF12, MDF12 and BB12
 - [x] merge all the ${sequence_name}/pipeline_joint_opt/eval_vis/nvdiffrast_overlay.mp4 for these 5 baselines and gt_overlay.mp4 in output_baseline  to output_ablation/ablation_compare_${sequence_name}.mp4 in  for the sequences of GSF12, MDF12 and BB12. Add the baseline caption above the ablation_compare_${sequence_name}.mp4. And write the merging script to baseline_compare.py, and integrate it to @run_wonder_hoi.py and @run_wonder_hoi.sh
+
+
+### 2026-06-10
+<!-- - [x] remove submodules in third_party:  BlenderToolbox, KinectFusion, RobustHOI_NeurIPS, bundlesdf, hold. -->
+- [ ] rename run_wonder_hoi.sh to run_rhoi.sh, and run_wonder_hoi.py to run_rhoi.py
+- [ ] 

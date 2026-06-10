@@ -28,70 +28,70 @@ for device in "${!device_sequences[@]}"; do
   sequences=${device_sequences[$device]}
   
   (
-    CUDA_VISIBLE_DEVICES=$device python run_wonder_hoi.py \
+    CUDA_VISIBLE_DEVICES=$device python run_rhoi.py \
       --execute_list data_convert \
       --process_list ho3d_estimate_hand_pose ho3d_interpolate_hamer \
       --seq_list $sequences --rebuild 
 
-    CUDA_VISIBLE_DEVICES=$device python run_wonder_hoi.py \
+    CUDA_VISIBLE_DEVICES=$device python run_rhoi.py \
       --execute_list hand_pose_postprocess \
       --process_list fit_hand_intrinsic fit_hand_trans \
       --seq_list $sequences --rebuild
 
-    CUDA_VISIBLE_DEVICES=$device python run_wonder_hoi.py \
+    CUDA_VISIBLE_DEVICES=$device python run_rhoi.py \
       --execute_list obj_process \
       --process_list ho3d_obj_SAM3D_filter_3D \
       --seq_list $sequences --rebuild                   
 
-    CUDA_VISIBLE_DEVICES=$device python run_wonder_hoi.py \
+    CUDA_VISIBLE_DEVICES=$device python run_rhoi.py \
       --execute_list obj_process \
       --process_list ho3d_align_SAM3D_mask ho3d_align_SAM3D_pts ho3d_align_SAM3D_fp \
       --seq_list $sequences --rebuild
 
-    CUDA_VISIBLE_DEVICES=$device python run_wonder_hoi.py \
+    CUDA_VISIBLE_DEVICES=$device python run_rhoi.py \
       --execute_list obj_process \
       --process_list pipeline_sam3d_align_filter pipeline_sam3d_best_id \
       --seq_list $sequences --rebuild        
 
-    CUDA_VISIBLE_DEVICES=$device python run_wonder_hoi.py \
+    CUDA_VISIBLE_DEVICES=$device python run_rhoi.py \
       --execute_list obj_process \
       --process_list pipeline_sam3d_delete_unused \
       --seq_list $sequences --rebuild    
 
-    CUDA_VISIBLE_DEVICES=$device python run_wonder_hoi.py \
+    CUDA_VISIBLE_DEVICES=$device python run_rhoi.py \
       --execute_list obj_process \
       --process_list ho3d_SAM3D_post_process \
       --seq_list $sequences --rebuild        
 
 
-    CUDA_VISIBLE_DEVICES=$device python run_wonder_hoi.py \
+    CUDA_VISIBLE_DEVICES=$device python run_rhoi.py \
       --execute_list obj_process \
       --process_list hoi_pipeline_data_preprocess hoi_pipeline_get_corres \
       --seq_list $sequences --rebuild 
 
-    CUDA_VISIBLE_DEVICES=$device python run_wonder_hoi.py \
+    CUDA_VISIBLE_DEVICES=$device python run_rhoi.py \
       --execute_list obj_process \
       --process_list hoi_pipeline_joint_opt \
       --seq_list $sequences --rebuild 
 
-    CUDA_VISIBLE_DEVICES=$device python run_wonder_hoi.py \
+    CUDA_VISIBLE_DEVICES=$device python run_rhoi.py \
       --execute_list obj_process \
       --process_list hoi_pipeline_neus_global \
       --seq_list $sequences --rebuild           
 
-    CUDA_VISIBLE_DEVICES=$device python run_wonder_hoi.py \
+    CUDA_VISIBLE_DEVICES=$device python run_rhoi.py \
       --execute_list obj_process \
       --process_list hoi_pipeline_align_hand_object_h hoi_pipeline_align_hand_object_r hoi_pipeline_align_hand_object_o hoi_pipeline_align_hand_object_ho \
       --seq_list $sequences --rebuild            
 
     
     echo "Running fit_hand on CUDA device $device with sequences: $sequences"
-    CUDA_VISIBLE_DEVICES=$device python run_wonder_hoi.py \
+    CUDA_VISIBLE_DEVICES=$device python run_rhoi.py \
       --execute_list obj_process \
       --process_list hoi_pipeline_eval_vis eval_sum_vis \
       --seq_list $sequences --rebuild
 
-    # CUDA_VISIBLE_DEVICES=$device python run_wonder_hoi.py \
+    # CUDA_VISIBLE_DEVICES=$device python run_rhoi.py \
     #   --execute_list obj_process \
     #   --process_list hoi_pipeline_blender_rendering \
     #   --seq_list $sequences --rebuild

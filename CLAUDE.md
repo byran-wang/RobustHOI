@@ -20,39 +20,39 @@ export RUN_ON_SERVER=false   # true on server (changes paths in confs/sequence_c
 seq_list="MC1"
 
 # Hand pose fitting
-python run_wonder_hoi.py --execute_list hand_pose_postprocess --process_list fit_hand_intrinsic fit_hand_trans --seq_list $seq_list --rebuild --dataset_type ho3d
+python run_rhoi.py --execute_list hand_pose_postprocess --process_list fit_hand_intrinsic fit_hand_trans --seq_list $seq_list --rebuild --dataset_type ho3d
 
 # SAM3D generation & alignment
-python run_wonder_hoi.py --execute_list obj_process --process_list ho3d_obj_SAM3D_gen ho3d_align_SAM3D_mask ho3d_align_SAM3D_pts --seq_list $seq_list --rebuild
+python run_rhoi.py --execute_list obj_process --process_list ho3d_obj_SAM3D_gen ho3d_align_SAM3D_mask ho3d_align_SAM3D_pts --seq_list $seq_list --rebuild
 
 # SAM3D post-processing
-python run_wonder_hoi.py --execute_list obj_process --process_list ho3d_SAM3D_post_process --seq_list $seq_list --rebuild
+python run_rhoi.py --execute_list obj_process --process_list ho3d_SAM3D_post_process --seq_list $seq_list --rebuild
 
 # Data preprocessing & correspondence
-python run_wonder_hoi.py --execute_list obj_process --process_list hoi_pipeline_data_preprocess hoi_pipeline_get_corres --seq_list $seq_list --rebuild
+python run_rhoi.py --execute_list obj_process --process_list hoi_pipeline_data_preprocess hoi_pipeline_get_corres --seq_list $seq_list --rebuild
 
 # SAM3D NeuS data preprocessing
-python run_wonder_hoi.py --execute_list obj_process --process_list hoi_pipeline_data_preprocess_sam3d_neus --seq_list $seq_list --rebuild
+python run_rhoi.py --execute_list obj_process --process_list hoi_pipeline_data_preprocess_sam3d_neus --seq_list $seq_list --rebuild
 
 # Joint optimization
-python run_wonder_hoi.py --execute_list obj_process --process_list hoi_pipeline_joint_opt --seq_list $seq_list --rebuild
+python run_rhoi.py --execute_list obj_process --process_list hoi_pipeline_joint_opt --seq_list $seq_list --rebuild
 
 # Hand-object alignment (hand, rotation, object, hand+object)
-python run_wonder_hoi.py --execute_list obj_process --process_list hoi_pipeline_align_hand_object_h hoi_pipeline_align_hand_object_r hoi_pipeline_align_hand_object_o hoi_pipeline_align_hand_object_ho --seq_list $seq_list --rebuild
+python run_rhoi.py --execute_list obj_process --process_list hoi_pipeline_align_hand_object_h hoi_pipeline_align_hand_object_r hoi_pipeline_align_hand_object_o hoi_pipeline_align_hand_object_ho --seq_list $seq_list --rebuild
 
 # Evaluation & visualization
-python run_wonder_hoi.py --execute_list obj_process --process_list hoi_pipeline_eval hoi_pipeline_eval_vis --seq_list $seq_list --rebuild
+python run_rhoi.py --execute_list obj_process --process_list hoi_pipeline_eval hoi_pipeline_eval_vis --seq_list $seq_list --rebuild
 
 # Summary evaluation
-python run_wonder_hoi.py --execute_list obj_process --process_list eval_sum eval_sum_vis --seq_list $seq_list --rebuild
+python run_rhoi.py --execute_list obj_process --process_list eval_sum eval_sum_vis --seq_list $seq_list --rebuild
 ```
 
 ## Architecture
 
 ### Orchestration
-- **run_wonder_hoi.py**: Central entry point. Maps `--execute_list` + `--process_list` to pipeline functions. Supports `--rebuild` (clear and regenerate), `--vis`, `--eval` flags.
+- **run_rhoi.py**: Central entry point. Maps `--execute_list` + `--process_list` to pipeline functions. Supports `--rebuild` (clear and regenerate), `--vis`, `--eval` flags.
 - **confs/sequence_config.py**: Routes to dataset-specific configs (e.g. `sequence_config_ho3d.py`) based on `DATASET` env var. Each sequence has `cond_idx`, `obj_num`, frame ranges.
-- **run.sh**, **run_wonder_hoi.sh**: Shell scripts chaining full pipeline stages.
+- **run.sh**, **run_rhoi.sh**: Shell scripts chaining full pipeline stages.
 
 ### Pipeline Stages (`robust_hoi_pipeline/`)
 The pipeline processes frames through these stages:
