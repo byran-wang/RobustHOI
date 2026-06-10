@@ -9,7 +9,7 @@ RobustHOI is a unified framework that reconstructs articulated hands and diverse
 ## Environment
 
 ```bash
-conda activate vggsfm_tmp  # Python 3.10, PyTorch 2.1.0 (CUDA 11.8)
+conda activate robust_hoi  # Python 3.10, PyTorch 2.1.0 (CUDA 11.8)
 export DATASET=ho3d         # or: zed, rs_zijian, zed_zijian
 export RUN_ON_SERVER=false   # true on server (changes paths in confs/sequence_config.py)
 ```

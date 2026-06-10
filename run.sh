@@ -1,5 +1,5 @@
 eval "$(conda shell.bash hook)"
-conda activate vggsfm_tmp
+conda activate robust_hoi
 
 # current_dir=$(pwd)
 # # data_dir=$current_dir/dataset_ZED

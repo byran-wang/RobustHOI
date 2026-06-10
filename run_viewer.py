@@ -25,7 +25,7 @@ scenes=["MC1"]
 # python crop_image.py --image_dir=$scene_dir/images_origin --output_dir=$scene_dir/images
 # rm -rf $out_dir
 # python demo_colmap.py --scene_dir=$scene_dir --use_ba --max_query_pts 200 --query_frame_num 10 --vis_thresh 0.20 --max_reproj_error 1000 --shared_camera --output_dir $out_dir --use_sfm --use_calibrated_intrinsic
-python_path='/home/simba/miniconda3/envs/vggsfm_tmp/bin/python'
+python_path='/home/simba/miniconda3/envs/robust_hoi/bin/python'
 for scene in scenes:
     scene_dir=f"{data_dir}/{scene}"
     out_dir=os.path.join(reconstruction_dir, scene)

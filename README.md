@@ -48,8 +48,8 @@ First, clone this repository to your local machine, and install the dependencies
 ```bash
 git clone --recurse-submodules git@github.com:byran-wang/vggt.git 
 cd vggt
-conda create -n vggsfm_tmp python=3.10 -y
-conda activate vggsfm_tmp
+conda create -n robust_hoi python=3.10 -y
+conda activate robust_hoi
 conda install -y pip setuptools wheel
 pip install torch==2.1.0 torchvision==0.16.0 torchaudio==2.1.0 --index-url https://download.pytorch.org/whl/cu118
 pip install -r requirements.txt
@@ -108,7 +108,7 @@ cd ../../../
 
 
 # ---- FoundationPose
-conda install -n vggsfm_tmp -c conda-forge boost-cpp -y
+conda install -n robust_hoi -c conda-forge boost-cpp -y
 # Install Eigen3 3.4.0
 cd $HOME && wget -q https://gitlab.com/libeigen/eigen/-/archive/3.4.0/eigen-3.4.0.tar.gz && \
 tar -xzf eigen-3.4.0.tar.gz && \
@@ -120,7 +120,7 @@ cd $HOME && rm -rf eigen-3.4.0 eigen-3.4.0.tar.gz
 # Build extensions
 cd third_party/FoundationPose
 # Note: ignore the mycuda setup error.
-CMAKE_PREFIX_PATH=~/miniconda3/envs/vggsfm_tmp/lib/python3.10/site-packages/pybind11/share/cmake/pybind11 bash build_all_conda.sh
+CMAKE_PREFIX_PATH=~/miniconda3/envs/robust_hoi/lib/python3.10/site-packages/pybind11/share/cmake/pybind11 bash build_all_conda.sh
 cd ../../
 
 
