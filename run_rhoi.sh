@@ -59,47 +59,47 @@ python run_rhoi.py --execute_list hand_pose_postprocess --process_list fit_hand_
 
 
 
-python run_rhoi.py --execute_list obj_process --process_list ho3d_align_by_foundation_pose --seq_list $seq_list --rebuild #--vis
+# python run_rhoi.py --execute_list obj_process --process_list ho3d_align_by_foundation_pose --seq_list $seq_list --rebuild #--vis
 
 # python run_rhoi.py --execute_list obj_process --process_list ho3d_keyframe_optimization --seq_list $seq_list --rebuild #--vis
 python run_rhoi.py --execute_list obj_process --process_list hoi_pipeline_data_preprocess hoi_pipeline_get_corres --seq_list $seq_list --rebuild
 python run_rhoi.py --execute_list obj_process --process_list hoi_pipeline_eval_corres --seq_list $seq_list --rebuild
-python run_rhoi.py --execute_list obj_process --process_list hoi_pipeline_data_preprocess_sam3d_neus --seq_list $seq_list --rebuild
+# python run_rhoi.py --execute_list obj_process --process_list hoi_pipeline_data_preprocess_sam3d_neus --seq_list $seq_list --rebuild
 
 # python run_rhoi.py --execute_list obj_process --process_list hoi_pipeline_get_corres --seq_list $seq_list --rebuild
 
 python run_rhoi.py --execute_list obj_process --process_list hoi_pipeline_joint_opt --seq_list $seq_list --rebuild
-python run_rhoi.py --execute_list obj_process --process_list hoi_pipeline_joint_opt_global --seq_list $seq_list --rebuild
-python run_rhoi.py --execute_list obj_process --process_list hoi_pipeline_reg_remaining --seq_list $seq_list --rebuild
+# python run_rhoi.py --execute_list obj_process --process_list hoi_pipeline_joint_opt_global --seq_list $seq_list --rebuild
+# python run_rhoi.py --execute_list obj_process --process_list hoi_pipeline_reg_remaining --seq_list $seq_list --rebuild
 python run_rhoi.py --execute_list obj_process --process_list hoi_pipeline_joint_opt --seq_list $seq_list --vis
-python run_rhoi.py --execute_list obj_process --process_list hoi_pipeline_neus_init --seq_list $seq_list --rebuild
+# python run_rhoi.py --execute_list obj_process --process_list hoi_pipeline_neus_init --seq_list $seq_list --rebuild
 python run_rhoi.py --execute_list obj_process --process_list hoi_pipeline_neus_global --seq_list $seq_list --rebuild #--export_only true
 
 
-python run_rhoi.py --execute_list obj_process --process_list hoi_pipeline_HY_gen --seq_list $seq_list --rebuild
-python run_rhoi.py --execute_list obj_process --process_list hoi_pipeline_align_SAM3D_with_HY --seq_list $seq_list --rebuild
-python run_rhoi.py --execute_list obj_process --process_list hoi_pipeline_3D_points_align_with_HY --seq_list $seq_list --rebuild
-python run_rhoi.py --execute_list obj_process --process_list hoi_pipeline_HY_omni_gen --seq_list $seq_list --rebuild
-python run_rhoi.py --execute_list obj_process --process_list hoi_pipeline_HY_to_SAM3D --seq_list $seq_list --rebuild
+# python run_rhoi.py --execute_list obj_process --process_list hoi_pipeline_HY_gen --seq_list $seq_list --rebuild
+# python run_rhoi.py --execute_list obj_process --process_list hoi_pipeline_align_SAM3D_with_HY --seq_list $seq_list --rebuild
+# python run_rhoi.py --execute_list obj_process --process_list hoi_pipeline_3D_points_align_with_HY --seq_list $seq_list --rebuild
+# python run_rhoi.py --execute_list obj_process --process_list hoi_pipeline_HY_omni_gen --seq_list $seq_list --rebuild
+# python run_rhoi.py --execute_list obj_process --process_list hoi_pipeline_HY_to_SAM3D --seq_list $seq_list --rebuild
 
-python run_rhoi.py --execute_list obj_process --process_list ho3d_align_gen_3d ho3d_align_gen_3d_omni --seq_list $seq_list --rebuild
-python run_rhoi.py --execute_list obj_process --process_list ho3d_obj_sdf_optimization --seq_list $seq_list --rebuild #--vis
+# python run_rhoi.py --execute_list obj_process --process_list ho3d_align_gen_3d ho3d_align_gen_3d_omni --seq_list $seq_list --rebuild
+# python run_rhoi.py --execute_list obj_process --process_list ho3d_obj_sdf_optimization --seq_list $seq_list --rebuild #--vis
 
-python run_rhoi.py --execute_list obj_process --process_list ho3d_eval_intrinsic ho3d_eval_trans ho3d_eval_rot --seq_list $seq_list --vis
-python run_rhoi.py --execute_list obj_process --process_list eval_sum_intrinsic eval_sum_trans eval_sum_rot --seq_list $seq_list
+# python run_rhoi.py --execute_list obj_process --process_list ho3d_eval_intrinsic ho3d_eval_trans ho3d_eval_rot --seq_list $seq_list --vis
+# python run_rhoi.py --execute_list obj_process --process_list eval_sum_intrinsic eval_sum_trans eval_sum_rot --seq_list $seq_list
 
 python run_rhoi.py --execute_list obj_process --process_list hoi_pipeline_align_hand_object_h hoi_pipeline_align_hand_object_r hoi_pipeline_align_hand_object_o hoi_pipeline_align_hand_object_ho --seq_list $seq_list --rebuild #--vis
 python run_rhoi.py --execute_list obj_process --process_list hoi_pipeline_eval --seq_list $seq_list --rebuild
 python run_rhoi.py --execute_list obj_process --process_list hoi_pipeline_eval_vis --seq_list $seq_list --rebuild
 # Per-frame input visualization (RGB+masks overlay, depth colormap, hand mesh overlay)
-python run_rhoi.py --execute_list obj_process --process_list hoi_pipeline_input_visulize --seq_list $seq_list --rebuild
+# python run_rhoi.py --execute_list obj_process --process_list hoi_pipeline_input_visulize --seq_list $seq_list --rebuild
 # Render hand+object meshes per-frame with Blender (PNGs + MP4)
-python run_rhoi.py --execute_list obj_process --process_list hoi_pipeline_blender_rendering --seq_list $seq_list --rebuild
+# python run_rhoi.py --execute_list obj_process --process_list hoi_pipeline_blender_rendering --seq_list $seq_list --rebuild
 # Visualize GT mesh, pose, and images in Rerun
-python run_rhoi.py --execute_list obj_process --process_list hoi_pipeline_eval_vis_gt --seq_list $seq_list
+# python run_rhoi.py --execute_list obj_process --process_list hoi_pipeline_eval_vis_gt --seq_list $seq_list
 # python run_rhoi.py --execute_list obj_process --process_list hoi_pipeline_teaser --seq_list $seq_list --rebuild
 # Export hand/object/merged meshes (camera space) for a single frame (defaults to cond_index)
-python run_rhoi.py --execute_list obj_process --process_list hoi_pipeline_hand_object_mesh --seq_list $seq_list --rebuild
+# python run_rhoi.py --execute_list obj_process --process_list hoi_pipeline_hand_object_mesh --seq_list $seq_list --rebuild
 
 python run_rhoi.py --execute_list obj_process --process_list eval_sum --seq_list $seq_list
 python run_rhoi.py --execute_list obj_process --process_list eval_sum_vis --seq_list $seq_list --rebuild
