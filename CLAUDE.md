@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-RobustHOI is a unified framework that reconstructs articulated hands and diverse objects from monocular RGB-D videos. It targets two challenges that defeat prior methods: objects that are textureless, reflective, transparent, or tiny, and mutual hand-object occlusion that leaves large surface regions unobserved.
+RobustHOI is a unified framework that reconstructs articulated hands and diverse objects from monocular RGB-D videos. It targets these challenges: objects that are textureless, reflective, transparent, or tiny, and mutual hand-object occlusion that leaves large surface regions unobserved.
 
 ## Environment
 
