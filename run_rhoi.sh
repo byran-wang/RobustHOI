@@ -1,5 +1,5 @@
 eval "$(conda shell.bash hook)"
-conda activate threestudio
+conda activate robust_hoi
 
 
 ##########################################################################
