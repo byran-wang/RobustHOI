@@ -95,16 +95,21 @@ The pipeline processes frames through these stages:
 1. **Data preprocessing** (`pipeline_data_preprocess.py`): Load images, depth, masks, intrinsics → cached `.pt` files
 2. **SAM3D filtering** (`pipeline_sam3d_filter_2D.py`, `pipeline_sam3d_filter_3D.py`): Filter SAM3D 3D reconstructions by 2D/3D consistency
 3. **Alignment** (`pipeline_sam3d_align.py`, `correspondence_alignment.py`): Align SAM3D mesh to image observations
-4. **Joint optimization** (`pipeline_joint_opt.py`, 112KB): Core module. Registers frames via PnP + RANSAC, refines poses with reprojection + depth + contact losses, integrates FoundationPose tracking, runs bundle adjustment
+4. **Joint optimization** (`pipeline_joint_opt.py`, ~95KB / 2200 lines): Core module. Registers frames via PnP + RANSAC, refines poses with reprojection + depth + contact/IoU losses, integrates FoundationPose tracking, runs keyframe bundle adjustment. Delegates per-frame logic to sibling modules: `frame_management.py` (`find_next_frame`, `check_frame_invalid`, `check_key_frame`, `process_key_frame`, `_refine_frame_pose_3d`, `save_keyframe_indices`), `optimization.py` (`register_new_frame_by_PnP`), `neus_integration.py` (`prepare_neus_data`, `run_neus_training`, `save_neus_mesh`).
 5. **Evaluation** (`pipeline_joint_opt_eval.py`): Computes rotation, translation, intrinsic errors vs GT
 
 ### Key Pipeline Module: `pipeline_joint_opt.py`
-- `prepare_joint_opt_inputs()`: Loads preprocessed data, VGGSfM tracks, SAM3D transform
-- `register_first_frame()`: Lifts 2D tracks to 3D at condition frame
-- `register_remaining_frames()`: Iteratively registers frames via PnP, FoundationPose fallback, depth alignment
-- `joint_optimization()`: Bundle adjustment over keyframes with reprojection + point-to-plane losses
-- `main()`: Orchestrates the full pipeline with logging to `output/{seq}/pipeline_joint_opt/log.txt`
-- FoundationPose estimator is lazily cached in `_foundation_pose_cache` dict
+Top-level flow (`main()` → orchestrates):
+- `prepare_joint_opt_inputs()`: Loads preprocessed data + VGGSfM tracks (`pipeline_corres/`) + SAM3D transform (`SAM3D_aligned_post_process/`); masks low-visibility tracks (`vis_thresh`) and aligns hand `o2c` poses to `cond_cam_to_obj` at the condition frame
+- `register_first_frame()` / `lift_tracks_to_3d()`: Lifts 2D tracks to 3D object points at the condition frame using depth + intrinsics
+- `register_remaining_frames()`: Iteratively registers each remaining frame — PnP (`register_new_frame_by_PnP`), FoundationPose fallback/tracking, depth alignment (`_align_object_with_hand`), outlier track masking, keyframe selection, and incremental NeuS; `check_which_estimate_is_better_and_update()` picks the better of PnP vs FoundationPose poses
+- `_joint_optimize_keyframes()`: Bundle adjustment (LBFGS) over keyframes with reprojection + point-to-plane depth + contact + IoU losses
+
+Notable helpers: FoundationPose tracking (`_get_foundation_pose`, `_run_foundation_pose_track`, `_reset_and_track_foundation_pose`); losses (`_compute_contact_loss`, `_compute_iou_loss`); depth-based mesh ICP (`_align_object_with_hand`); pose validity checks (`_check_pose_moved`, `_is_hand_far_from_object`).
+
+- **Logging**: `main()` tees `stdout`/`stderr` through `TeeStream` and adds a `FileHandler` (`PlainFormatter`), both writing to `output/{seq}/pipeline_joint_opt/txt.log`
+- **FoundationPose**: estimator is lazily cached in the module-level `_foundation_pose_cache` dict
+- **CLI**: `--data_dir`, `--output_dir`, `--cond_index`, `--vis_thresh` (0.3), `--optimize_3D_prior`, `--neus_init_steps` (1000)
 
 ### Visualization (`viewer/`)
 - **viewer_step.py**: Rerun-based interactive viewer for per-frame results
@@ -118,7 +123,7 @@ The pipeline processes frames through these stages:
 - **GT data** (`gt.load_data`): Returns xdict with `o2c`, `is_valid`, `K`, `v3d_c.right` (hand verts in cam), `mesh_name.object`, etc.
 
 ### Coding Rules
-- **Logging**: Never use `print()`. Always use `from utils_simba.logger import get_logger; logger = get_logger(__name__)` for colored terminal output. `ColoredFormatter` in `third_party/utils_simba/utils_simba/logger.py` provides level-colored output. `pipeline_joint_opt.py` adds a `FileHandler` to also write logs to `log.txt`.
+- **Logging**: Never use `print()`. Always use `from utils_simba.logger import get_logger; logger = get_logger(__name__)` for colored terminal output. `ColoredFormatter` in `third_party/utils_simba/utils_simba/logger.py` provides level-colored output. `pipeline_joint_opt.py` adds a `FileHandler` to also write logs to `pipeline_joint_opt/txt.log`.
 - **Rerun visualization**: Use helper functions from `utils_simba.rerun` (`log_camera_frame`, `load_mesh_as_trimesh`, `get_vertex_colors`, `stamp_frame_text`, `backproject_depth_to_points`). Do not call raw `rr.log` for cameras/meshes when a helper exists.
 - **Depth processing**: Use functions from `utils_simba.depth` (`get_depth`, `depth2xyzmap`). Do not write custom depth loading/conversion code.
 - **Debug helpers**: All debug/visualization functions for `pipeline_joint_opt.py` live in `robust_hoi_pipeline/pipeline_joint_opt_debug.py`. Do not add debug functions directly to `pipeline_joint_opt.py`; add them to the debug module and import them.
@@ -141,7 +146,7 @@ ho3d_v3/
 output/{seq_id}/
 ├── pipeline_preprocess/       # Preprocessed frames, frame_list.txt
 ├── SAM3D_aligned_post_process/# SAM3D results with camera.json per frame
-├── pipeline_joint_opt/log.txt # Pipeline log (ANSI colored)
+├── pipeline_joint_opt/txt.log # Pipeline log (tee'd stdout/stderr + FileHandler)
 ├── results/{frame_id}/        # results.pkl, points.ply, mesh.obj, reproj_error.png
 └── metrics_summary/           # Aggregated eval metrics
 ```
