@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-RobustHOI is a unified framework that reconstructs articulated hands and diverse objects from monocular RGB-D videos. It targets these challenges: objects that are textureless, reflective, transparent, or tiny, and mutual hand-object occlusion that leaves large surface regions unobserved.
+Reconstructing hand-object interactions (HOI) from RGB-D video is challenging: objects are often textureless, reflective, or tiny, and mutual hand-object occlusion leaves large surface regions unobserved. RobustHOI addresses this by jointly leveraging generative shape priors, multi-view geometric constraints, and hand-object contact priors, producing complete and metrically accurate reconstructions of both object and hand across all frames.
 
 ## Environment
 

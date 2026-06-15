@@ -1,29 +1,30 @@
 <div align="center">
-<h1>VGGT: Visual Geometry Grounded Transformer</h1>
+<h1>RobustHOI: Robust Hand-object Reconstruction from
+RGB-D Video by Leveraging Hand and Object Priors</h1>
 
-<a href="https://jytime.github.io/data/VGGT_CVPR25.pdf" target="_blank" rel="noopener noreferrer">
+<!-- <a href="https://jytime.github.io/data/VGGT_CVPR25.pdf" target="_blank" rel="noopener noreferrer">
   <img src="https://img.shields.io/badge/Paper-VGGT" alt="Paper PDF">
 </a>
 <a href="https://arxiv.org/abs/2503.11651"><img src="https://img.shields.io/badge/arXiv-2503.11651-b31b1b" alt="arXiv"></a>
 <a href="https://vgg-t.github.io/"><img src="https://img.shields.io/badge/Project_Page-green" alt="Project Page"></a>
-<a href='https://huggingface.co/spaces/facebook/vggt'><img src='https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Demo-blue'></a>
+<a href='https://huggingface.co/spaces/facebook/vggt'><img src='https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Demo-blue'></a> -->
 
 
-**[Visual Geometry Group, University of Oxford](https://www.robots.ox.ac.uk/~vgg/)**; **[Meta AI](https://ai.facebook.com/research/)**
+<!-- **[Visual Geometry Group, University of Oxford](https://www.robots.ox.ac.uk/~vgg/)**; **[Meta AI](https://ai.facebook.com/research/)** -->
 
 
-[Jianyuan Wang](https://jytime.github.io/), [Minghao Chen](https://silent-chen.github.io/), [Nikita Karaev](https://nikitakaraevv.github.io/), [Andrea Vedaldi](https://www.robots.ox.ac.uk/~vedaldi/), [Christian Rupprecht](https://chrirupp.github.io/), [David Novotny](https://d-novotny.github.io/)
+<!-- [Jianyuan Wang](https://jytime.github.io/), [Minghao Chen](https://silent-chen.github.io/), [Nikita Karaev](https://nikitakaraevv.github.io/), [Andrea Vedaldi](https://www.robots.ox.ac.uk/~vedaldi/), [Christian Rupprecht](https://chrirupp.github.io/), [David Novotny](https://d-novotny.github.io/) -->
 </div>
 
-```bibtex
+<!-- ```bibtex
 @inproceedings{wang2025vggt,
   title={VGGT: Visual Geometry Grounded Transformer},
   author={Wang, Jianyuan and Chen, Minghao and Karaev, Nikita and Vedaldi, Andrea and Rupprecht, Christian and Novotny, David},
   booktitle={Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition},
   year={2025}
 }
-```
-
+``` -->
+<!-- 
 ## Updates
 - [June 13, 2025] Honored to receive the Best Paper Award at CVPR 2025! Apologies if I’m slow to respond to queries or GitHub issues these days. If you’re interested, our oral presentation is available [here](https://docs.google.com/presentation/d/1JVuPnuZx6RgAy-U5Ezobg73XpBi7FrOh/edit?usp=sharing&ouid=107115712143490405606&rtpof=true&sd=true). (Note: it’s shared in .pptx format with animations — quite large, but feel free to use it as a template if helpful.)
 
@@ -34,20 +35,20 @@
 - [May 3, 2025] Evaluation code for reproducing our camera pose estimation results on Co3D is now available in the [evaluation](https://github.com/facebookresearch/vggt/tree/evaluation) branch. 
 
 
-- [Apr 13, 2025] Training code is being gradually cleaned and uploaded to the [training](https://github.com/facebookresearch/vggt/tree/training) branch. It will be merged into the main branch once finalized.
+- [Apr 13, 2025] Training code is being gradually cleaned and uploaded to the [training](https://github.com/facebookresearch/vggt/tree/training) branch. It will be merged into the main branch once finalized. -->
 
 ## Overview
 
-Visual Geometry Grounded Transformer (VGGT, CVPR 2025) is a feed-forward neural network that directly infers all key 3D attributes of a scene, including extrinsic and intrinsic camera parameters, point maps, depth maps, and 3D point tracks, **from one, a few, or hundreds of its views, within seconds**.
+Reconstructing hand-object interactions (HOI) from RGB-D video is challenging: objects are often textureless, reflective, or tiny, and mutual hand-object occlusion leaves large surface regions unobserved. RobustHOI addresses this by jointly leveraging generative shape priors, multi-view geometric constraints, and hand-object contact priors, producing complete and metrically accurate reconstructions of both object and hand across all frames. RobustHOI achieves a **success rate exceeding 95%** on a challenging dataset of 108 in-the-wild HOI sequences, demonstrating robustness well beyond controlled benchmarks.
 
 
 ## Quick Start
 
-First, clone this repository to your local machine, and install the dependencies (torch, torchvision, numpy, Pillow, and huggingface_hub). 
+First, clone this repository to your local machine, and install the dependencies. 
 
 ```bash
-git clone --recurse-submodules git@github.com:byran-wang/vggt.git 
-cd vggt
+git clone --recurse-submodules git@github.com:byran-wang/RobustHOI.git 
+cd RobustHOI
 conda create -n robust_hoi python=3.10 -y
 conda activate robust_hoi
 conda install -y pip setuptools wheel
@@ -69,9 +70,9 @@ rm -rf ~/.cache/torch/_extensions
 pip install git+https://github.com/NVlabs/nvdiffrast.git --no-build-isolation
 
 # Install LightGlue
-git clone https://github.com/jytime/LightGlue.git dependency/LightGlue
+git clone https://github.com/jytime/LightGlue.git third_party/LightGlue
 
-cd dependency/LightGlue/
+cd third_party/LightGlue/
 python -m pip install -e .  # editable mode
 cd ../../
 
@@ -80,7 +81,7 @@ cd ..
 git clone https://github.com/zc-alexfan/smplx.git
 cd smplx
 python setup.py install
-cd ../vggt
+cd ../RobustHOI
 
 conda install ipython
 # --- pytroch3d
@@ -124,7 +125,7 @@ CMAKE_PREFIX_PATH=~/miniconda3/envs/robust_hoi/lib/python3.10/site-packages/pybi
 cd ../../
 
 
-# ---- hold
+# ---- kaolin
 # install kaolin from pip
 pip install kaolin==0.15.0 -f https://nvidia-kaolin.s3.us-east-2.amazonaws.com/torch-2.1.0_cu118.html
 
@@ -135,8 +136,8 @@ pip install kaolin==0.15.0 -f https://nvidia-kaolin.s3.us-east-2.amazonaws.com/t
 # python setup.py install
 # cd ../../
 
-cd third_party/hold/code && python setup.py build_ext --inplace
-pip install pygit2==1.10.1 comet-ml==3.40.0
+# cd third_party/hold/code && python setup.py build_ext --inplace
+# pip install pygit2==1.10.1 comet-ml==3.40.0
 
 ## Third party lib installation
 ```bash
@@ -147,10 +148,10 @@ cd third_party/hamer
 /home/shibo/.conda/envs/hamer/bin/python -m pip install -e ".[all]" 
 /home/shibo/.conda/envs/hamer/bin/python -m pip install -e third-party/ViTPose
 # we do not need to install detecton2 to detect hand bbox. And use wilor_yolo to detect hand bbox
-rsync -azvp pretrained_models  shibo@3090_server1:/data1/shibo/Documents/project/vggt_wenxuan_new/third_party/hamer/ #copy pretrained model from wilor_yolo
+wget https://huggingface.co/spaces/rolpotamias/WiLoR/resolve/main/pretrained_models/detector.pt -P ./pretrained_models/ #copy pretrained model from wilor_yolo
 cd ..
-mkdir -p hamer/_DATA/data/mano
-cp -r ../code/body_models/* hamer/_DATA/data/mano
+mkdir -p _DATA/data/mano
+cp -r  ../../body_models/* _DATA/data/mano
 
 # ---- FoundationStereo
 # read installation in third_party/FoundationStereo
