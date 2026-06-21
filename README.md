@@ -1,386 +1,233 @@
 <div align="center">
 <h1>RobustHOI: Robust Hand-object Reconstruction from
 RGB-D Video by Leveraging Hand and Object Priors</h1>
-
-<!-- <a href="https://jytime.github.io/data/VGGT_CVPR25.pdf" target="_blank" rel="noopener noreferrer">
-  <img src="https://img.shields.io/badge/Paper-VGGT" alt="Paper PDF">
-</a>
-<a href="https://arxiv.org/abs/2503.11651"><img src="https://img.shields.io/badge/arXiv-2503.11651-b31b1b" alt="arXiv"></a>
-<a href="https://vgg-t.github.io/"><img src="https://img.shields.io/badge/Project_Page-green" alt="Project Page"></a>
-<a href='https://huggingface.co/spaces/facebook/vggt'><img src='https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Demo-blue'></a> -->
-
-
-<!-- **[Visual Geometry Group, University of Oxford](https://www.robots.ox.ac.uk/~vgg/)**; **[Meta AI](https://ai.facebook.com/research/)** -->
-
-
-<!-- [Jianyuan Wang](https://jytime.github.io/), [Minghao Chen](https://silent-chen.github.io/), [Nikita Karaev](https://nikitakaraevv.github.io/), [Andrea Vedaldi](https://www.robots.ox.ac.uk/~vedaldi/), [Christian Rupprecht](https://chrirupp.github.io/), [David Novotny](https://d-novotny.github.io/) -->
 </div>
-
-<!-- ```bibtex
-@inproceedings{wang2025vggt,
-  title={VGGT: Visual Geometry Grounded Transformer},
-  author={Wang, Jianyuan and Chen, Minghao and Karaev, Nikita and Vedaldi, Andrea and Rupprecht, Christian and Novotny, David},
-  booktitle={Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition},
-  year={2025}
-}
-``` -->
-<!-- 
-## Updates
-- [June 13, 2025] Honored to receive the Best Paper Award at CVPR 2025! Apologies if I’m slow to respond to queries or GitHub issues these days. If you’re interested, our oral presentation is available [here](https://docs.google.com/presentation/d/1JVuPnuZx6RgAy-U5Ezobg73XpBi7FrOh/edit?usp=sharing&ouid=107115712143490405606&rtpof=true&sd=true). (Note: it’s shared in .pptx format with animations — quite large, but feel free to use it as a template if helpful.)
-
-
-- [June 2, 2025] Added a script to run VGGT and save predictions in COLMAP format, with bundle adjustment support optional. The saved COLMAP files can be directly used with [gsplat](https://github.com/nerfstudio-project/gsplat) or other NeRF/Gaussian splatting libraries.
-
-
-- [May 3, 2025] Evaluation code for reproducing our camera pose estimation results on Co3D is now available in the [evaluation](https://github.com/facebookresearch/vggt/tree/evaluation) branch. 
-
-
-- [Apr 13, 2025] Training code is being gradually cleaned and uploaded to the [training](https://github.com/facebookresearch/vggt/tree/training) branch. It will be merged into the main branch once finalized. -->
 
 ## Overview
 
 Reconstructing hand-object interactions (HOI) from RGB-D video is challenging: objects are often textureless, reflective, or tiny, and mutual hand-object occlusion leaves large surface regions unobserved. RobustHOI addresses this by jointly leveraging generative shape priors, multi-view geometric constraints, and hand-object contact priors, producing complete and metrically accurate reconstructions of both object and hand across all frames. RobustHOI achieves a **success rate exceeding 95%** on a challenging dataset of 108 in-the-wild HOI sequences, demonstrating robustness well beyond controlled benchmarks.
 
+## System Requirements
 
-## Quick Start
+This setup was verified on:
 
-First, clone this repository to your local machine, and install the dependencies. 
+- **OS**: Ubuntu 22.04, x86_64
+- **GPU**: NVIDIA RTX 4090 (Ada, compute capability `sm_89`)
+- **CUDA toolkit**: 12.4 (`nvcc` at `/usr/local/cuda-12.4`); NVIDIA driver supporting CUDA ≥ 12.1
+- **Host compiler**: gcc/g++ 11 (required by `nvdiffrast`/`tiny-cuda-nn`)
+- **Python**: 3.10
+- **Package manager**: [`uv`](https://github.com/astral-sh/uv) (no conda required)
+
+> **Note on PyTorch CUDA build.** PyTorch is installed as `2.1.0+cu121`. The `cu121`
+> runtime wheels run fine against the CUDA 12.4 driver/toolkit, and the locally
+> compiled extensions (`nvdiffrast`, `tiny-cuda-nn`, FoundationPose `mycuda`) are
+> built with the system's CUDA 12.4 `nvcc`.
+
+> **Adapt for your GPU.** Replace `sm_89` / `8.9` / `TCNN_CUDA_ARCHITECTURES=89`
+> below with your GPU's compute capability (e.g. `86` for RTX 3090, `80` for A100).
+
+## Installation
+
+### 1. Clone with submodules
 
 ```bash
-git clone --recurse-submodules git@github.com:byran-wang/RobustHOI.git 
+git clone --recurse-submodules git@github.com:byran-wang/RobustHOI.git
 cd RobustHOI
-conda create -n robust_hoi python=3.10 -y
-conda activate robust_hoi
-conda install -y pip setuptools wheel
-pip install torch==2.1.0 torchvision==0.16.0 torchaudio==2.1.0 --index-url https://download.pytorch.org/whl/cu118
-pip install -r requirements.txt
-
-# --- nvdiffrast
-pip install setuptools wheel ninja
-# in ubuntu 22.04, the gcc version is 12.3.0 which is great than 11.xxx, a version the nvdiffrast need. 
-conda install -y -c conda-forge gcc_linux-64=11 gxx_linux-64=11 ninja
-export CC=x86_64-conda-linux-gnu-gcc
-export CXX=x86_64-conda-linux-gnu-g++
-# clear the cache
-rm -rf ~/.cache/torch_extensions
-rm -rf ~/.cache/torch/_extensions
-# sanity
-# $CC --version
-# $CXX --version
-pip install git+https://github.com/NVlabs/nvdiffrast.git --no-build-isolation
-
-# Install LightGlue
-git clone https://github.com/jytime/LightGlue.git third_party/LightGlue
-
-cd third_party/LightGlue/
-python -m pip install -e .  # editable mode
-cd ../../
-
-# --- smplx (custom)
-cd ..
-git clone https://github.com/zc-alexfan/smplx.git
-cd smplx
-python setup.py install
-cd ../RobustHOI
-
-conda install ipython
-# --- pytroch3d
-# ref https://github.com/facebookresearch/pytorch3d/blob/main/INSTALL.md
-!ipython  # run on the terminal
-import sys
-import torch
-pyt_version_str=torch.__version__.split("+")[0].replace(".", "")
-version_str="".join([
-    f"py3{sys.version_info.minor}_cu",
-    torch.version.cuda.replace(".",""),
-    f"_pyt{pyt_version_str}"
-])
-!pip install fvcore iopath
-!pip install --no-index --no-cache-dir pytorch3d -f https://dl.fbaipublicfiles.com/pytorch3d/packaging/wheels/{version_str}/download.html
-
-# ---- tiny cuda
-export PATH="/usr/local/cuda-11.8:/usr/local/cuda-11.8/bin/:$PATH"
-export CUDA_PATH='/usr/local/cuda-11.8'
-export LD_LIBRARY_PATH="/usr/local/cuda-11.8/lib64:$LD_LIBRARY_PATH"
-git clone --recursive https://github.com/nvlabs/tiny-cuda-nn
-cd tiny-cuda-nn/bindings/torch
-python setup.py install
-cd ../../../
-
-
-# ---- FoundationPose
-conda install -n robust_hoi -c conda-forge boost-cpp -y
-# Install Eigen3 3.4.0
-cd $HOME && wget -q https://gitlab.com/libeigen/eigen/-/archive/3.4.0/eigen-3.4.0.tar.gz && \
-tar -xzf eigen-3.4.0.tar.gz && \
-cd eigen-3.4.0 && mkdir build && cd build
-cmake .. -Wno-dev -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS=-std=c++14 ..
-sudo make install
-cd $HOME && rm -rf eigen-3.4.0 eigen-3.4.0.tar.gz
-
-# Build extensions
-cd third_party/FoundationPose
-# Note: ignore the mycuda setup error.
-CMAKE_PREFIX_PATH=~/miniconda3/envs/robust_hoi/lib/python3.10/site-packages/pybind11/share/cmake/pybind11 bash build_all_conda.sh
-cd ../../
-
-
-# ---- kaolin
-# install kaolin from pip
-pip install kaolin==0.15.0 -f https://nvidia-kaolin.s3.us-east-2.amazonaws.com/torch-2.1.0_cu118.html
-
-# install kaolin from source code
-# git clone --recursive https://github.com/NVIDIAGameWorks/kaolin
-# cd kaolin
-# git checkout v0.10.0
-# python setup.py install
-# cd ../../
-
-# cd third_party/hold/code && python setup.py build_ext --inplace
-# pip install pygit2==1.10.1 comet-ml==3.40.0
-
-## Third party lib installation
-```bash
-# ---- hamer
-set -e
-cd third_party/hamer
-
-/home/shibo/.conda/envs/hamer/bin/python -m pip install -e ".[all]" 
-/home/shibo/.conda/envs/hamer/bin/python -m pip install -e third-party/ViTPose
-# we do not need to install detecton2 to detect hand bbox. And use wilor_yolo to detect hand bbox
-wget https://huggingface.co/spaces/rolpotamias/WiLoR/resolve/main/pretrained_models/detector.pt -P ./pretrained_models/ #copy pretrained model from wilor_yolo
-cd ..
-mkdir -p _DATA/data/mano
-cp -r  ../../body_models/* _DATA/data/mano
-
-# ---- FoundationStereo
-# read installation in third_party/FoundationStereo
-rsync -azvp pretrained_models  shibo@3090_server1:/data1/shibo/Documents/project/vggt_wenxuan_new/third_party/FoundationStereo/
-
-
-
-```
-Alternatively, you can install VGGT as a package (<a href="docs/package.md">click here</a> for details).
-
-
-Now, try the model with just a few lines of code:
-
-```python
-import torch
-from vggt.models.vggt import VGGT
-from vggt.utils.load_fn import load_and_preprocess_images
-
-device = "cuda" if torch.cuda.is_available() else "cpu"
-# bfloat16 is supported on Ampere GPUs (Compute Capability 8.0+) 
-dtype = torch.bfloat16 if torch.cuda.get_device_capability()[0] >= 8 else torch.float16
-
-# Initialize the model and load the pretrained weights.
-# This will automatically download the model weights the first time it's run, which may take a while.
-model = VGGT.from_pretrained("facebook/VGGT-1B").to(device)
-
-# Load and preprocess example images (replace with your own image paths)
-image_names = ["path/to/imageA.png", "path/to/imageB.png", "path/to/imageC.png"]  
-images = load_and_preprocess_images(image_names).to(device)
-
-with torch.no_grad():
-    with torch.cuda.amp.autocast(dtype=dtype):
-        # Predict attributes including cameras, depth maps, and point maps.
-        predictions = model(images)
+git submodule update --init --recursive
 ```
 
-The model weights will be automatically downloaded from Hugging Face. If you encounter issues such as slow loading, you can manually download them [here](https://huggingface.co/facebook/VGGT-1B/blob/main/model.pt) and load, or:
-
-```python
-model = VGGT()
-_URL = "https://huggingface.co/facebook/VGGT-1B/resolve/main/model.pt"
-model.load_state_dict(torch.hub.load_state_dict_from_url(_URL))
-```
-
-## Detailed Usage
-
-<details>
-<summary>Click to expand</summary>
-
-You can also optionally choose which attributes (branches) to predict, as shown below. This achieves the same result as the example above. This example uses a batch size of 1 (processing a single scene), but it naturally works for multiple scenes.
-
-```python
-from vggt.utils.pose_enc import pose_encoding_to_extri_intri
-from vggt.utils.geometry import unproject_depth_map_to_point_map
-
-with torch.no_grad():
-    with torch.cuda.amp.autocast(dtype=dtype):
-        images = images[None]  # add batch dimension
-        aggregated_tokens_list, ps_idx = model.aggregator(images)
-                
-    # Predict Cameras
-    pose_enc = model.camera_head(aggregated_tokens_list)[-1]
-    # Extrinsic and intrinsic matrices, following OpenCV convention (camera from world)
-    extrinsic, intrinsic = pose_encoding_to_extri_intri(pose_enc, images.shape[-2:])
-
-    # Predict Depth Maps
-    depth_map, depth_conf = model.depth_head(aggregated_tokens_list, images, ps_idx)
-
-    # Predict Point Maps
-    point_map, point_conf = model.point_head(aggregated_tokens_list, images, ps_idx)
-        
-    # Construct 3D Points from Depth Maps and Cameras
-    # which usually leads to more accurate 3D points than point map branch
-    point_map_by_unprojection = unproject_depth_map_to_point_map(depth_map.squeeze(0), 
-                                                                extrinsic.squeeze(0), 
-                                                                intrinsic.squeeze(0))
-
-    # Predict Tracks
-    # choose your own points to track, with shape (N, 2) for one scene
-    query_points = torch.FloatTensor([[100.0, 200.0], 
-                                        [60.72, 259.94]]).to(device)
-    track_list, vis_score, conf_score = model.track_head(aggregated_tokens_list, images, ps_idx, query_points=query_points[None])
-```
-
-
-Furthermore, if certain pixels in the input frames are unwanted (e.g., reflective surfaces, sky, or water), you can simply mask them by setting the corresponding pixel values to 0 or 1. Precise segmentation masks aren't necessary - simple bounding box masks work effectively (check this [issue](https://github.com/facebookresearch/vggt/issues/47) for an example).
-
-</details>
-
-
-## Interactive Demo
-
-We provide multiple ways to visualize your 3D reconstructions. Before using these visualization tools, install the required dependencies:
+### 2. Create the environment and install PyTorch
 
 ```bash
-pip install -r requirements_demo.txt
+uv venv --python 3.10 .venv
+source .venv/bin/activate
+
+# PyTorch 2.1.0 + CUDA 12.1. The official index (download.pytorch.org/whl/cu121)
+# works but can be slow; the Aliyun mirror below is a fast drop-in in CN.
+uv pip install torch==2.1.0 torchvision==0.16.0 torchaudio==2.1.0 \
+    --find-links https://mirrors.aliyun.com/pytorch-wheels/cu121/ \
+    --index-url https://mirrors.aliyun.com/pypi/simple/
+
+# Two important pins:
+#   numpy<2       -> torch 2.1.0 is built against the NumPy 1.x ABI
+#   setuptools<81 -> torch's cpp_extension imports pkg_resources, removed in setuptools 81+
+uv pip install "numpy==1.23.1" "setuptools==69.5.1" wheel
+
+# Sanity check
+python -c "import torch; print(torch.__version__, torch.cuda.is_available(), torch.cuda.get_device_name(0))"
+# -> 2.1.0+cu121 True NVIDIA GeForce RTX 4090
 ```
 
-### Interactive 3D Visualization
+> If `torch.cuda.is_available()` is `True` but you later hit `libcublas`/`libcudnn`
+> import errors, install the CUDA runtime wheels explicitly:
+> ```bash
+> uv pip install nvidia-cublas-cu12==12.1.3.1 nvidia-cudnn-cu12==8.9.2.26 \
+>   nvidia-cuda-runtime-cu12==12.1.105 nvidia-cuda-nvrtc-cu12==12.1.105 \
+>   nvidia-cuda-cupti-cu12==12.1.105 nvidia-cufft-cu12==11.0.2.54 \
+>   nvidia-curand-cu12==10.3.2.106 nvidia-cusolver-cu12==11.4.5.107 \
+>   nvidia-cusparse-cu12==12.1.0.106 nvidia-nccl-cu12==2.18.1 nvidia-nvtx-cu12==12.1.105 \
+>   --find-links https://mirrors.aliyun.com/pytorch-wheels/cu121/
+> ```
 
-**Please note:** VGGT typically reconstructs a scene in less than 1 second. However, visualizing 3D points may take tens of seconds due to third-party rendering, independent of VGGT's processing time. The visualization is slow especially when the number of images is large.
-
-
-#### Gradio Web Interface
-
-Our Gradio-based interface allows you to upload images/videos, run reconstruction, and interactively explore the 3D scene in your browser. You can launch this in your local machine or try it on [Hugging Face](https://huggingface.co/spaces/facebook/vggt).
-
+### 3. Install Python requirements
 
 ```bash
-python demo_gradio.py
+# chumpy has a broken build (imports numpy/pip at build time) -> install it separately
+uv pip install -r <(grep -v '^chumpy' requirements.txt) \
+    --index-url https://mirrors.aliyun.com/pypi/simple/
+uv pip install chumpy==0.70 --no-build-isolation \
+    --index-url https://mirrors.aliyun.com/pypi/simple/
 ```
 
-<details>
-<summary>Click to preview the Gradio interactive interface</summary>
-
-![Gradio Web Interface Preview](https://jytime.github.io/data/vggt_hf_demo_screen.png)
-</details>
-
-
-#### Viser 3D Viewer
-
-Run the following command to run reconstruction and visualize the point clouds in viser. Note this script requires a path to a folder containing images. It assumes only image files under the folder. You can set `--use_point_map` to use the point cloud from the point map branch, instead of the depth-based point cloud.
+### 4. Build the compiled extensions
 
 ```bash
-python demo_viser.py --image_folder path/to/your/images/folder
+export CUDA_HOME=/usr/local/cuda-12.4
+export PATH=$CUDA_HOME/bin:$PATH
+export CC=/usr/bin/gcc CXX=/usr/bin/g++
+mkdir -p dependency
+
+# --- utils_simba (logging / rendering / depth helpers, imported everywhere) ---
+# Its setup.py packaging is broken; expose it on the path directly:
+echo "$(pwd)/third_party/utils_simba" > .venv/lib/python3.10/site-packages/utils_simba.pth
+python -c "from utils_simba.logger import get_logger; print('utils_simba OK')"
+
+# --- nvdiffrast (FoundationPose rasterization; JIT-compiles CUDA on first use) ---
+git clone --depth 1 https://github.com/NVlabs/nvdiffrast.git dependency/nvdiffrast
+uv pip install -e dependency/nvdiffrast --no-deps --no-build-isolation
+
+# --- PyTorch3D (prebuilt wheel for py310 / cu121 / pyt210) ---
+uv pip install \
+  https://dl.fbaipublicfiles.com/pytorch3d/packaging/wheels/py310_cu121_pyt210/pytorch3d-0.7.5-cp310-cp310-linux_x86_64.whl \
+  --no-deps
+uv pip install iopath   # runtime dependency of pytorch3d.io
+
+# --- smplx (custom fork used by the hand model) ---
+git clone --depth 1 https://github.com/zc-alexfan/smplx.git dependency/smplx
+uv pip install -e dependency/smplx --no-deps --no-build-isolation
+
+# --- tiny-cuda-nn (NeuS hash encoding) ---
+git clone --recursive https://github.com/NVlabs/tiny-cuda-nn.git dependency/tiny-cuda-nn
+TCNN_CUDA_ARCHITECTURES=89 python dependency/tiny-cuda-nn/bindings/torch/setup.py install
+
+# --- Eigen 3.4.0 headers (header-only; needed by FoundationPose mycuda/mycpp) ---
+wget -q https://gitlab.com/libeigen/eigen/-/archive/3.4.0/eigen-3.4.0.tar.gz -O /tmp/eigen-3.4.0.tar.gz
+tar -xzf /tmp/eigen-3.4.0.tar.gz -C dependency/
+export EIGEN_DIR="$(pwd)/dependency/eigen-3.4.0"
+
+# --- FoundationPose CUDA extension (octree ray tracing) ---
+( cd third_party/FoundationPose/bundlesdf/mycuda && \
+  TORCH_CUDA_ARCH_LIST="8.9" CPATH="$EIGEN_DIR:$CPATH" \
+  python -m pip install -e . --no-build-isolation )
+
+# --- FoundationPose C++ extension mycpp (pose clustering) ---
+# The repo's CMakeLists requires Boost, but the sources only #include'd Boost
+# headers that are never actually used. This build path drops Boost and points
+# CMake at the local Eigen headers (no system Boost / no sudo required).
+uv pip install cmake
+( cd third_party/FoundationPose/mycpp && rm -rf build && mkdir build && cd build && \
+  cmake .. -Dpybind11_DIR="$(python -c 'import pybind11; print(pybind11.get_cmake_dir())')" \
+           -DEIGEN3_INCLUDE_DIR="$EIGEN_DIR" && \
+  make -j$(nproc) )
 ```
 
-## Exporting to COLMAP Format
+If `find_package(Boost REQUIRED ...)` is still present in
+`third_party/FoundationPose/mycpp/CMakeLists.txt`, remove the Boost lines and the
+three unused `#include <boost/...>` lines in `mycpp/include/Utils.h` and
+`mycpp/src/app/pybind_api.cpp` (the patch is already applied in this checkout).
 
-We also support exporting VGGT's predictions directly to COLMAP format, by:
+### 5. Interpreter shim for `run_rhoi.py`
 
-```bash 
-# Feedforward prediction only
-python demo_colmap.py --scene_dir=/YOUR/SCENE_DIR/ 
+`run_rhoi.py` launches each pipeline stage as a subprocess using the hard-coded path
+`~/miniconda3/envs/robust_hoi/bin/python` (and the conda gcc names for `CC`/`CXX`).
+Point those at the uv venv so no code changes are needed:
 
-# With bundle adjustment
-python demo_colmap.py --scene_dir=/YOUR/SCENE_DIR/ --use_ba
-# check the file for additional bundle adjustment configuration options
+```bash
+mkdir -p ~/miniconda3/envs
+ln -sfn "$(pwd)/.venv" ~/miniconda3/envs/robust_hoi
+ln -sf "$(which gcc)" .venv/bin/x86_64-conda-linux-gnu-gcc
+ln -sf "$(which g++)" .venv/bin/x86_64-conda-linux-gnu-g++
 ```
 
-Please ensure that the images are stored in `/YOUR/SCENE_DIR/images/`. This folder should contain only the images. Check the examples folder for the desired data structure. 
+(Symlinking the **whole** venv directory — not just `bin/python` — is required so
+that Python finds `pyvenv.cfg` and resolves the venv's `site-packages`.)
 
-The reconstruction result (camera parameters and 3D points) will be automatically saved under `/YOUR/SCENE_DIR/sparse/` in the COLMAP format, such as:
+### 6. Model weights & assets
 
-``` 
-SCENE_DIR/
-├── images/
-└── sparse/
-    ├── cameras.bin
-    ├── images.bin
-    └── points3D.bin
+These are not in the repo and must be placed manually:
+
+| Asset | Location | Notes |
+|-------|----------|-------|
+| FoundationPose weights | `third_party/FoundationPose/weights/{2023-10-28-18-33-37, 2024-01-11-20-02-45}/` | scorer + refiner checkpoints (`model_best.pth`, `config.yml`), ~247 MB |
+| MANO / contact models | `body_models/` (repo root) | `MANO_RIGHT.pkl`, `contact_zones.pkl`, `sealed_vertices_sem_idx.npy`, … (~257 MB) |
+| HaMeR MANO data | `third_party/hamer/_DATA/data/mano/` | `cp -r body_models/* third_party/hamer/_DATA/data/mano` (only needed for hand-pose estimation stages) |
+
+## Data
+
+This repo was verified on **HO3D_v3**. Point the repo at your dataset directory with a
+symlink at the repo root (several eval scripts read `./ho3d_v3/...` relative to the repo):
+
+```bash
+ln -sfn /path/to/HO3D_v3 ho3d_v3
+# e.g. ln -sfn ~/Documents/dataset/BundleSDF/HO3D_v3 ho3d_v3
 ```
 
-## Integration with Gaussian Splatting
+`confs/sequence_config_ho3d.py` resolves the dataset at
+`~/Documents/dataset/BundleSDF/HO3D_v3/train/` when `DATASET=ho3d`. Expected layout:
 
-
-The exported COLMAP files can be directly used with [gsplat](https://github.com/nerfstudio-project/gsplat) for Gaussian Splatting training. Install `gsplat` following their official instructions (we recommend `gsplat==1.3.0`):
-
-An example command to train the model is:
 ```
-cd gsplat
-python examples/simple_trainer.py  default --data_factor 1 --data_dir /YOUR/SCENE_DIR/ --result_dir /YOUR/RESULT_DIR/
+HO3D_v3/
+├── train/{seq}/             # rgb/, depth/, meta/, mask_*/, plus precomputed
+│                            #   pipeline_preprocess/, pipeline_corres/,
+│                            #   SAM3D_aligned_post_process/, SAM3D_align_filter/
+├── models/{object_id}/      # YCB 3D models (textured.obj)
+└── processed/{seq}.pt       # preprocessed GT (used by vggt/utils/gt.py)
 ```
 
+The end-to-end script below consumes the already-preprocessed intermediates
+(`pipeline_preprocess/`, `pipeline_corres/`, `SAM3D_aligned_post_process/`). To generate
+those from raw RGB-D (SAM3 masks, SAM3D shape prior, HaMeR hand pose, FoundationStereo
+depth, etc.), see the full stage list in `CLAUDE.md` / `run_rhoi.sh`.
 
+## Running
 
-## Zero-shot Single-view Reconstruction
+The verified entry point reconstructs object + hand for a sequence end-to-end:
 
-Our model shows surprisingly good performance on single-view reconstruction, although it was never trained for this task. The model does not need to duplicate the single-view image to a pair, instead, it can directly infer the 3D structure from the tokens of the single view image. Feel free to try it with our demos above, which naturally works for single-view reconstruction.
+```bash
+bash run_rhoi_ho3d.sh          # default seq_list="MC1"
+```
 
+The script activates the venv, sets `DATASET=ho3d`, and runs, in order:
 
-We did not quantitatively test monocular depth estimation performance ourselves, but [@kabouzeid](https://github.com/kabouzeid) generously provided a comparison of VGGT to recent methods [here](https://github.com/facebookresearch/vggt/issues/36). VGGT shows competitive or better results compared to state-of-the-art monocular approaches such as DepthAnything v2 or MoGe, despite never being explicitly trained for single-view tasks. 
+1. `hoi_pipeline_joint_opt`   — PnP/RANSAC registration + FoundationPose tracking + keyframe bundle adjustment + incremental NeuS
+2. `hoi_pipeline_neus_global` — global NeuS surface reconstruction
+3. `hoi_pipeline_align_hand_object_{h,r,o,ho}` — hand / rotation / object / hand+object alignment
+4. `hoi_pipeline_eval`        — object pose (ADD/ADD-S), shape (CD/F-score), hand (MPJPE) metrics
+5. `eval_sum`                 — aggregate the per-sequence table
 
+Outputs land under `output/{seq}/`:
 
+```
+output/MC1/
+├── pipeline_joint_opt/        # per-frame results, neus_data/, txt.log
+├── pipeline_neus_global/      # global NeuS mesh
+├── align_hand_object/         # aligned hand + object
+└── pipeline_joint_opt/eval/   # metric.json, metric_all.npy
+output/metrics_summary/eval.txt # aggregated table
+```
 
-## Runtime and GPU Memory
+To run other sequences, edit `seq_list` in `run_rhoi_ho3d.sh` (19 HO3D sequences are
+configured in `confs/sequence_config_ho3d.py`).
 
-We benchmark the runtime and GPU memory usage of VGGT's aggregator on a single NVIDIA H100 GPU across various input sizes. 
+## Repository Layout
 
-| **Input Frames** | 1 | 2 | 4 | 8 | 10 | 20 | 50 | 100 | 200 |
-|:----------------:|:-:|:-:|:-:|:-:|:--:|:--:|:--:|:---:|:---:|
-| **Time (s)**     | 0.04 | 0.05 | 0.07 | 0.11 | 0.14 | 0.31 | 1.04 | 3.12 | 8.75 |
-| **Memory (GB)**  | 1.88 | 2.07 | 2.45 | 3.23 | 3.63 | 5.58 | 11.41 | 21.15 | 40.63 |
-
-Note that these results were obtained using Flash Attention 3, which is faster than the default Flash Attention 2 implementation while maintaining almost the same memory usage. Feel free to compile Flash Attention 3 from source to get better performance.
-
-
-## Research Progression
-
-Our work builds upon a series of previous research projects. If you're interested in understanding how our research evolved, check out our previous works:
-
-
-<table border="0" cellspacing="0" cellpadding="0">
-  <tr>
-    <td align="left">
-      <a href="https://github.com/jytime/Deep-SfM-Revisited">Deep SfM Revisited</a>
-    </td>
-    <td style="white-space: pre;">──┐</td>
-    <td></td>
-  </tr>
-  <tr>
-    <td align="left">
-      <a href="https://github.com/facebookresearch/PoseDiffusion">PoseDiffusion</a>
-    </td>
-    <td style="white-space: pre;">─────►</td>
-    <td>
-      <a href="https://github.com/facebookresearch/vggsfm">VGGSfM</a> ──►
-      <a href="https://github.com/facebookresearch/vggt">VGGT</a>
-    </td>
-  </tr>
-  <tr>
-    <td align="left">
-      <a href="https://github.com/facebookresearch/co-tracker">CoTracker</a>
-    </td>
-    <td style="white-space: pre;">──┘</td>
-    <td></td>
-  </tr>
-</table>
-
-
-## Acknowledgements
-
-Thanks to these great repositories: [PoseDiffusion](https://github.com/facebookresearch/PoseDiffusion), [VGGSfM](https://github.com/facebookresearch/vggsfm), [CoTracker](https://github.com/facebookresearch/co-tracker), [DINOv2](https://github.com/facebookresearch/dinov2), [Dust3r](https://github.com/naver/dust3r), [Moge](https://github.com/microsoft/moge), [PyTorch3D](https://github.com/facebookresearch/pytorch3d), [Sky Segmentation](https://github.com/xiongzhu666/Sky-Segmentation-and-Post-processing), [Depth Anything V2](https://github.com/DepthAnything/Depth-Anything-V2), [Metric3D](https://github.com/YvanYin/Metric3D) and many other inspiring works in the community.
-
-## Checklist
-
-- [ ] Release the training code
-- [ ] Release VGGT-500M and VGGT-200M
-
+- `run_rhoi.py` — central orchestrator mapping `--execute_list` / `--process_list` to stages
+- `run_rhoi_ho3d.sh` — minimal end-to-end HO3D run; `run_rhoi.sh` — the full pipeline incl. preprocessing
+- `robust_hoi_pipeline/` — the core pipeline (joint optimization, NeuS integration, evaluation)
+- `confs/` — dataset/sequence configuration (`DATASET` env var selects the dataset)
+- `third_party/` — FoundationPose, instant-nsr-pl (NeuS), SAM3, HaMeR, utils_simba, …
+- See `CLAUDE.md` for an in-depth architecture and coordinate-convention reference.
 
 ## License
+
 See the [LICENSE](./LICENSE.txt) file for details about the license under which this code is made available.
