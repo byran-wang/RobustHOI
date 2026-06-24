@@ -28,6 +28,7 @@ eval_fn_dict = {
     "add_s_auc": eval_m.eval_add_s_auc_object,
     "image_info": eval_m.eval_image_info,
     "mpjpe_ra_r": eval_m.eval_mpjpe_right,
+    "global_mpjpe_r": eval_m.eval_global_mpjpe_right,
     "cd_f_right": eval_m.eval_cd_f_right,
 }
 
@@ -640,6 +641,26 @@ def main():
                 v3d_right_list.append(torch.from_numpy(v_right.astype(np.float32)))
             data_pred["v3d_right.object"] = v3d_right_list
 
+    # Build world-frame (object-frame) hand joint trajectories for global
+    # motion metrics (G-MPJPE / GA-MPJPE). The object frame is the static world
+    # anchor here, so the hand joints transformed by camera-to-object give the
+    # global hand motion for both prediction and GT.
+    if "j3d_ra.right" in data_pred and "root.right" in data_pred:
+        j3d_ra = data_pred["j3d_ra.right"]
+        j3d_ra = j3d_ra.numpy() if torch.is_tensor(j3d_ra) else np.asarray(j3d_ra)
+        root_r = data_pred["root.right"]
+        root_r = root_r.numpy() if torch.is_tensor(root_r) else np.asarray(root_r)
+        # Reconstruct predicted hand joints in camera space (M, 21, 3).
+        j3d_c_pred = (j3d_ra + root_r[:, None, :]).astype(np.float64)
+        c2o_pred_world = np.linalg.inv(aligned_pred_extrinsics)  # (M, 4, 4)
+        data_pred["j3d_glob.right"] = transform_points(j3d_c_pred, c2o_pred_world)
+
+        j3d_c_gt = data_gt["j3d_c.right"]
+        j3d_c_gt = j3d_c_gt.numpy() if torch.is_tensor(j3d_c_gt) else np.asarray(j3d_c_gt)
+        c2o_gt_world = np.linalg.inv(gt_o2c_all)  # (M, 4, 4)
+        gt_glob = transform_points(j3d_c_gt.astype(np.float64), c2o_gt_world)
+        dict.__setitem__(data_gt, "j3d_glob.right", torch.from_numpy(gt_glob).float())
+
     if args.vis_gt_pred:
         visualize_gt_and_pred_in_rerun(
             data_gt, aligned_pred_extrinsics, data_pred["valid_frame_indices"], SAM3D_dir,
@@ -653,7 +674,7 @@ def main():
     print("------------------")
     print("Involving the following eval_fn:")
     active_eval_fns = {}
-    hand_eval_keys = {"mpjpe_ra_r", "cd_f_right"}
+    hand_eval_keys = {"mpjpe_ra_r", "global_mpjpe_r", "cd_f_right"}
     for eval_fn_name, eval_fn in eval_fn_dict.items():
         if eval_fn_name in hand_eval_keys and "j3d_ra.right" not in data_pred:
             print(f"  {eval_fn_name} (SKIPPED - no hand data)")
@@ -703,7 +724,7 @@ def main():
     time_str = current_time.strftime("%m-%d %H:%M")
     mean_metrics["timestamp"] = time_str
     mean_metrics["seq_name"] = seq_name
-    print("Units: CD (cm), F-score (percentage), MPJPE (mm)")
+    print("Units: CD (cm), F-score (percentage), MPJPE / G-MPJPE / GA-MPJPE (mm)")
 
     # Save the mean_metrics dictionary to a JSON file with indentation
     with open(json_path, "w") as f:

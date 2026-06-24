@@ -571,6 +571,109 @@ def eval_mpjpe_right(data_pred, data_gt, metric_dict):
     return metric_dict
 
 
+def _rigid_align_transform(src, dst):
+    """Least-squares rigid transform (rotation + translation, no scale).
+
+    Solves for (R, t) minimizing ||(R @ src + t) - dst|| over the point sets
+    using the Kabsch/Umeyama algorithm. Matches SLAHMR/GLAMR world-frame
+    alignment used for global hand-motion metrics.
+
+    Args:
+        src: (N, 3) source points.
+        dst: (N, 3) target points.
+
+    Returns:
+        (R, t): rotation (3, 3) and translation (3,) such that
+        ``(R @ src.T).T + t`` aligns ``src`` onto ``dst``.
+    """
+    src = np.asarray(src, dtype=np.float64)
+    dst = np.asarray(dst, dtype=np.float64)
+    src_mean = src.mean(axis=0)
+    dst_mean = dst.mean(axis=0)
+    src_c = src - src_mean
+    dst_c = dst - dst_mean
+    H = src_c.T @ dst_c
+    U, _, Vt = np.linalg.svd(H)
+    # Reflection-safe rotation (ensure det(R) = +1)
+    d = np.sign(np.linalg.det(Vt.T @ U.T))
+    D = np.diag([1.0, 1.0, d])
+    R = Vt.T @ D @ U.T
+    t = dst_mean - R @ src_mean
+    return R, t
+
+
+def _apply_rigid(pts, R, t):
+    """Apply a rigid transform to (T, J, 3) joints. Returns (T, J, 3)."""
+    flat = pts.reshape(-1, 3)
+    out = (R @ flat.T).T + t
+    return out.reshape(pts.shape)
+
+
+def eval_global_mpjpe_right(data_pred, data_gt, metric_dict):
+    """Global hand-motion metrics: G-MPJPE and GA-MPJPE (mm).
+
+    Both operate on the right-hand joint trajectory expressed in the world
+    (object) frame, following the SLAHMR/GLAMR convention used by Dyn-HaMR:
+
+    - ``g_mpjpe``  (G-MPJPE):  rigidly align the predicted trajectory to GT
+      using only the **first valid frame**, then per-frame MPJPE over the whole
+      sequence. Captures accumulated global drift.
+    - ``ga_mpjpe`` (GA-MPJPE): rigidly align the predicted trajectory to GT with
+      a **single transform fit over all valid frames** (Procrustes over the full
+      trajectory, rotation + translation only), then per-frame MPJPE. Captures
+      global motion consistency independent of a global rigid offset.
+
+    Expects ``data_pred["j3d_glob.right"]`` and ``data_gt["j3d_glob.right"]`` as
+    (T, J, 3) world-frame joints in meters; results are returned in mm.
+    """
+    pred = data_pred.get("j3d_glob.right")
+    gt = data_gt.get("j3d_glob.right")
+    if pred is None or gt is None:
+        print("[WARN][eval_global_mpjpe_right] missing world-frame hand joints; skipping G/GA-MPJPE.")
+        return metric_dict
+
+    pred = _to_numpy(pred).astype(np.float64)  # (T, J, 3)
+    gt = _to_numpy(gt).astype(np.float64)      # (T, J, 3)
+    T = min(len(pred), len(gt))
+    pred = pred[:T]
+    gt = gt[:T]
+
+    is_valid = _to_numpy(data_gt.get("is_valid"))
+    if is_valid is not None:
+        valid = is_valid[:T].astype(bool)
+    else:
+        valid = np.ones(T, dtype=bool)
+    # Drop frames with non-finite or dummy (-1000) joints just in case.
+    finite = np.isfinite(pred).all(axis=(1, 2)) & np.isfinite(gt).all(axis=(1, 2))
+    not_dummy = np.abs(gt).reshape(T, -1).max(axis=1) < 100.0
+    valid = valid & finite & not_dummy
+
+    g_mpjpe = np.full(T, np.nan)
+    ga_mpjpe = np.full(T, np.nan)
+
+    if valid.sum() >= 1:
+        vp = pred[valid]
+        vg = gt[valid]
+
+        # G-MPJPE: align using the first valid frame only.
+        R0, t0 = _rigid_align_transform(vp[0], vg[0])
+        pred_g = _apply_rigid(pred, R0, t0)
+        err_g = np.linalg.norm(pred_g - gt, axis=2).mean(axis=1) * 1000.0
+        g_mpjpe[valid] = err_g[valid]
+
+        # GA-MPJPE: single rigid alignment over the whole valid trajectory.
+        Rg, tg = _rigid_align_transform(
+            vp.reshape(-1, 3), vg.reshape(-1, 3)
+        )
+        pred_ga = _apply_rigid(pred, Rg, tg)
+        err_ga = np.linalg.norm(pred_ga - gt, axis=2).mean(axis=1) * 1000.0
+        ga_mpjpe[valid] = err_ga[valid]
+
+    metric_dict["g_mpjpe"] = g_mpjpe
+    metric_dict["ga_mpjpe"] = ga_mpjpe
+    return metric_dict
+
+
 def eval_ious(data_pred, data_gt, metric_dict):
     masks_pred = data_pred["masks_pred"].long().numpy()
     masks_gt = data_gt["masks_gt"].long().numpy()
