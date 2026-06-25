@@ -12,7 +12,7 @@ import numpy as np
 # import pycolmap
 import torch
 import torch.nn.functional as F
-# from lightglue import ALIKED, SIFT, SuperPoint
+from lightglue import ALIKED, SIFT, SuperPoint
 
 from .vggsfm_tracker import TrackerPredictor
 
