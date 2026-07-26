@@ -1775,6 +1775,7 @@ def register_remaining_frames(image_info, preprocessed_data, output_dir: Path, c
                                neus_ckpt=None, neus_total_steps=0, sam3d_root_dir=None,
                                neus_mesh_path=None, optimize_3D_prior=False):
 
+    import time
     from robust_hoi_pipeline.frame_management import (
         find_next_frame,
         check_frame_invalid,
@@ -1794,6 +1795,18 @@ def register_remaining_frames(image_info, preprocessed_data, output_dir: Path, c
 
     args = _build_default_joint_opt_args(output_dir, cond_idx)
     args.optimize_3D_prior = optimize_3D_prior
+
+    # Initialize timing dict
+    timing_stats = {
+        "_filter_depth_by_object_bbox": 0.0,
+        "register_new_frame_by_PnP": 0.0,
+        "_track_foundation_pose": 0.0,
+        "check_which_estimate_is_better_and_update": 0.0,
+        "_align_object_with_hand": 0.0,
+        "keyframe_selection": 0.0,
+        "_joint_optimize_keyframes": 0.0,
+        "run_neus_training": 0.0,
+    }
     
 
     frame_indices = image_info["frame_indices"]
@@ -1876,17 +1889,21 @@ def register_remaining_frames(image_info, preprocessed_data, output_dir: Path, c
         # cleans background clutter before PnP / FoundationPose see the depth.
         _nearby_pose, _ = _estimate_pose_from_nearest_registered(image_info_work, next_frame_idx)
         if _nearby_pose is not None:
+            _t0 = time.time()
             _filter_depth_by_object_bbox(
                 image_info_work, next_frame_idx,
                 extrinsic=_nearby_pose,
             )
+            timing_stats["_filter_depth_by_object_bbox"] += time.time() - _t0
 
         best_score = np.inf
         best_pose_overall = None
         estimate_success = False
+        _t0 = time.time()
         pnp_pose, pnp_success = register_new_frame_by_PnP(
             image_info_work, next_frame_idx, args, update_pose=False, return_pose=True
-        )        
+        )
+        timing_stats["register_new_frame_by_PnP"] += time.time() - _t0        
         # Debug: dump SAM3D/NeuS meshes and PnP-pose depth points for this frame
         _frame_dbg_dir = None
         if not RUN_ON_SERVER:
@@ -1906,12 +1923,14 @@ def register_remaining_frames(image_info, preprocessed_data, output_dir: Path, c
             fp_crop_ratio *= (1 / fp_crop_ratio_scale)
 
 
+            _t0 = time.time()
             fp_pose_sam3d, fp_success_sam3d, fp_pose_neus, fp_success_neus = _track_foundation_pose_one_iter(
                 image_info_work, next_frame_idx,
                 sam3d_mesh, neus_mesh_trimesh,
                 pnp_pose, pnp_success,
                 iters, fp_crop_ratio, best_pose_overall,
             )
+            timing_stats["_track_foundation_pose"] += time.time() - _t0
 
             # Debug: object-space depth point clouds for each candidate FP pose
             _iter_dbg_dir = (_frame_dbg_dir / f"iter_{iters:02d}") if _frame_dbg_dir is not None else None
@@ -1920,6 +1939,7 @@ def register_remaining_frames(image_info, preprocessed_data, output_dir: Path, c
                 fp_pose_sam3d=fp_pose_sam3d, fp_pose_neus=fp_pose_neus,
             )
 
+            _t0 = time.time()
             iter_pose, iter_success, iter_score, ref_pts_obj, ref_source = check_which_estimate_is_better_and_update(
                 image_info_work,
                 next_frame_idx,
@@ -1930,6 +1950,7 @@ def register_remaining_frames(image_info, preprocessed_data, output_dir: Path, c
                 fp_pose_neus=fp_pose_neus,
                 fp_success_neus=fp_success_neus,
             )
+            timing_stats["check_which_estimate_is_better_and_update"] += time.time() - _t0
             _dump_ref_pts_obj(_iter_dbg_dir, ref_pts_obj, ref_source)
             logger.debug(f"[register] Frame {next_frame_idx} iter {iters}: score={iter_score:.6f}, fp_crop_ratio={fp_crop_ratio:.2f}")
             if iter_success and iter_score < best_score:
@@ -1948,7 +1969,9 @@ def register_remaining_frames(image_info, preprocessed_data, output_dir: Path, c
         # Save depth 3D points in object space for this frame
         _save_depth_points_obj(image_info_work, next_frame_idx, tag="after_PnP")
         mask_track_for_outliers(image_info_work, next_frame_idx, args.pnp_reproj_thresh, min_track_number=1)
+        _t0 = time.time()
         _filter_depth_by_object_bbox(image_info_work, next_frame_idx)
+        timing_stats["_filter_depth_by_object_bbox"] += time.time() - _t0
         
         reproj_ok, mean_error = check_reprojection_error(image_info_work, next_frame_idx, args)
         is_moved = _check_pose_moved(image_info_work, next_frame_idx)
@@ -1963,9 +1986,11 @@ def register_remaining_frames(image_info, preprocessed_data, output_dir: Path, c
                 _obj_mesh = neus_mesh_trimesh if neus_mesh_trimesh is not None else sam3d_mesh
                 if _is_hand_far_from_object(image_info_work, next_frame_idx, _obj_mesh, debug_dir=debug_dir):
                     logger.warning("hand is too far from object, so we will align the object with the hand")
+                    _t0 = time.time()
                     _align_object_with_hand(image_info_work, next_frame_idx, _obj_mesh,
                                                  debug_dir=debug_dir
                                                  )
+                    timing_stats["_align_object_with_hand"] += time.time() - _t0
 
                     _, mean_error = check_reprojection_error(image_info_work, next_frame_idx, args, skip_check=True)
                     logger.info(f"[register_remaining_frames] After object_hand alignment, reprojection error for frame {next_frame_idx}: {mean_error:.2f}")
@@ -1977,6 +2002,7 @@ def register_remaining_frames(image_info, preprocessed_data, output_dir: Path, c
         key_frame_min_reproj_thresh = 2.0
         # if mean_error <= key_frame_min_reproj_thresh:
         if 1:
+            _t0 = time.time()
             if check_key_frame(
                 image_info_work,
                 next_frame_idx,
@@ -1989,6 +2015,7 @@ def register_remaining_frames(image_info, preprocessed_data, output_dir: Path, c
                     image_info_work = process_key_frame(image_info_work, next_frame_idx, args)
                 except Exception as exc:
                     logger.warning(f"[register_remaining_frames] process_key_frame failed: {exc}")
+            timing_stats["keyframe_selection"] += time.time() - _t0
         else:
             logger.warning(f"Frame {image_info['frame_indices'][next_frame_idx]} not marked as keyframe due to high reprojection error ({mean_error:.2f} > {key_frame_min_reproj_thresh})")     
 
@@ -1997,10 +2024,12 @@ def register_remaining_frames(image_info, preprocessed_data, output_dir: Path, c
         if key_frame_num >= args.min_track_number:
             try:
                 mesh_path = None # disable point-2-plane optimization
+                _t0 = time.time()
                 _joint_optimize_keyframes(
                     image_info_work, mesh_path, cond_local_idx,
                     min_track_number=args.min_track_number,
                 )
+                timing_stats["_joint_optimize_keyframes"] += time.time() - _t0
                 # Print reprojection error after joint optimization for the newly registered frame
                 kf_indices_arr = np.where(image_info_work["keyframe"].astype(bool))[0]
                 print_frame_reproj_error(image_info_work, next_frame_idx, tag="joint_opt")
@@ -2012,7 +2041,9 @@ def register_remaining_frames(image_info, preprocessed_data, output_dir: Path, c
             except Exception as exc:
                 logger.warning(f"[register_remaining_frames] joint optimization failed: {exc}")
 
+        _t0 = time.time()
         _filter_depth_by_object_bbox(image_info_work, next_frame_idx, bbox_min=[-0.55, -0.55, -0.55], bbox_max=[0.55, 0.55, 0.55])
+        timing_stats["_filter_depth_by_object_bbox"] += time.time() - _t0
 
         if image_info_work['keyframe'][next_frame_idx] and (key_frame_num >= 5) and (key_frame_num % 5 == 0) and args.optimize_3D_prior:
             neus_data_dir = output_dir / "pipeline_joint_opt" / "neus_data" / f"{image_info_work['frame_indices'][next_frame_idx]:04d}"
@@ -2043,6 +2074,7 @@ def register_remaining_frames(image_info, preprocessed_data, output_dir: Path, c
                 )
 
                 reset_neus_cache()
+                _t0 = time.time()
                 neus_ckpt, neus_mesh_path = run_neus_training(
                     neus_data_dir,
                     config_path="configs/neus-pipeline.yaml",
@@ -2053,6 +2085,7 @@ def register_remaining_frames(image_info, preprocessed_data, output_dir: Path, c
                     robust_hoi_weight=1.0,
                     sam3d_weight=0.0,
                 )
+                timing_stats["run_neus_training"] += time.time() - _t0
                 if neus_mesh_path is not None and Path(neus_mesh_path).exists():
                     import trimesh
                     # Evict old NeuS estimator from cache before replacing the mesh
@@ -2077,6 +2110,17 @@ def register_remaining_frames(image_info, preprocessed_data, output_dir: Path, c
         save_results(image_info=image_info, register_idx= image_info['frame_indices'][next_frame_idx], preprocessed_data=preprocessed_data, results_dir=output_dir / "pipeline_joint_opt", only_save_register_order=args.only_save_register_order)
 
     save_results(image_info=image_info, register_idx= image_info['frame_indices'][next_frame_idx], preprocessed_data=preprocessed_data, results_dir=output_dir / "pipeline_joint_opt")
+
+    # Log timing statistics
+    logger.info("=" * 80)
+    logger.info("TIMING STATISTICS (register_remaining_frames)")
+    logger.info("=" * 80)
+    total_time = sum(timing_stats.values())
+    for func_name, elapsed in sorted(timing_stats.items(), key=lambda x: x[1], reverse=True):
+        percentage = (elapsed / total_time * 100) if total_time > 0 else 0.0
+        logger.info(f"  {func_name:45s}: {elapsed:8.2f}s ({percentage:5.1f}%)")
+    logger.info(f"  {'TOTAL':45s}: {total_time:8.2f}s")
+    logger.info("=" * 80)
 
 
 def main(args):
