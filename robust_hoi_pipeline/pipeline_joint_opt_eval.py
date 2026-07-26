@@ -21,6 +21,173 @@ from viewer.viewer_step import HandDataProvider
 from utils_simba.geometry import transform_points
 device = "cuda:0"
 
+_glctx_cache = {}
+
+
+def _get_glctx():
+    if "glctx" not in _glctx_cache:
+        import nvdiffrast.torch as dr
+        _glctx_cache["glctx"] = dr.RasterizeCudaContext()
+    return _glctx_cache["glctx"]
+
+
+def _render_to_mask_depth(verts_cam, faces, K, H, W):
+    """Render mesh (verts already in camera space) → (mask HxW bool, depth HxW float32).
+    Returns (None, None) on failure.
+    """
+    try:
+        import nvdiffrast.torch as dr
+        from utils_simba.render import projection_matrix_from_intrinsics, glcam_in_cvcam
+        glctx = _get_glctx()
+        verts_t = torch.as_tensor(verts_cam, dtype=torch.float32, device="cuda")
+        faces_t = torch.as_tensor(np.asarray(faces, dtype=np.int32), dtype=torch.int32, device="cuda")
+        # verts already in cam space → identity ob_in_cvcam
+        eye = torch.eye(4, dtype=torch.float32, device="cuda").unsqueeze(0)
+        ob_in_glcam = torch.tensor(glcam_in_cvcam, dtype=torch.float32, device="cuda").unsqueeze(0) @ eye
+        proj = torch.as_tensor(
+            projection_matrix_from_intrinsics(K, H, W, znear=0.01, zfar=10.0),
+            dtype=torch.float32, device="cuda"
+        ).unsqueeze(0)
+        mtx = proj @ ob_in_glcam
+        verts_homo = torch.cat([verts_t, torch.ones(len(verts_t), 1, device="cuda")], dim=-1)
+        pos_clip = (mtx[:, None] @ verts_homo[None, ..., None])[..., 0]
+        rast_out, _ = dr.rasterize(glctx, pos_clip, faces_t, resolution=[H, W])
+        z_vals = verts_t[:, 2:3].unsqueeze(0)  # (1,V,1)
+        depth_map, _ = dr.interpolate(z_vals, rast_out, faces_t)
+        depth_np = depth_map[0, :, :, 0].cpu().numpy()
+        mask_np = (rast_out[0, :, :, 3] > 0).cpu().numpy()
+        return mask_np, depth_np
+    except Exception:
+        return None, None
+
+def eval_mask_iou(data_pred, data_gt, metric_dict):
+    """Mask IOU of hand and object between rendered mask and GT mask."""
+    from robust_hoi_pipeline.pipeline_utils import load_preprocessed_frame
+    frame_indices = data_pred["valid_frame_indices"]
+    K = data_gt["K"].numpy() if torch.is_tensor(data_gt["K"]) else np.array(data_gt["K"])
+    v3d_c_obj = data_gt.get("v3d_c.object")
+    v3d_c_hand = data_gt.get("v3d_c.right")
+    faces_obj = data_gt.get("faces.object")
+    faces_hand = data_gt.get("faces.right")
+    data_preprocess_dir = Path(data_pred["data_preprocess_dir"]) if "data_preprocess_dir" in data_pred else None
+
+    def _iou(pred_mask, gt_mask):
+        p, g = pred_mask.astype(bool), gt_mask.astype(bool)
+        inter = (p & g).sum()
+        union = (p | g).sum()
+        return float(inter) / float(union) if union > 0 else float('nan')
+
+    iou_obj_list, iou_hand_list = [], []
+    for i, fid in enumerate(frame_indices):
+        gt_frame = None
+        if data_preprocess_dir is not None:
+            try:
+                gt_frame = load_preprocessed_frame(data_preprocess_dir, fid)
+            except Exception:
+                pass
+        H, W = (gt_frame["image"].shape[:2] if gt_frame is not None and gt_frame.get("image") is not None else (480, 640))
+
+        if v3d_c_obj is not None and faces_obj is not None and gt_frame is not None:
+            verts = v3d_c_obj[i].numpy() if torch.is_tensor(v3d_c_obj[i]) else np.array(v3d_c_obj[i])
+            pred_mask, _ = _render_to_mask_depth(verts, faces_obj, K, H, W)
+            gt_mask = gt_frame.get("mask_obj")
+            iou_obj_list.append(_iou(pred_mask, gt_mask > 0) if pred_mask is not None and gt_mask is not None else float('nan'))
+        else:
+            iou_obj_list.append(float('nan'))
+
+        if v3d_c_hand is not None and faces_hand is not None and gt_frame is not None:
+            verts = v3d_c_hand[i].numpy() if torch.is_tensor(v3d_c_hand[i]) else np.array(v3d_c_hand[i])
+            pred_mask, _ = _render_to_mask_depth(verts, faces_hand, K, H, W)
+            gt_mask = gt_frame.get("mask_hand")
+            iou_hand_list.append(_iou(pred_mask, gt_mask > 0) if pred_mask is not None and gt_mask is not None else float('nan'))
+        else:
+            iou_hand_list.append(float('nan'))
+
+    metric_dict["mask_iou_obj"] = np.array(iou_obj_list, dtype=np.float32)
+    metric_dict["mask_iou_hand"] = np.array(iou_hand_list, dtype=np.float32)
+    return metric_dict
+
+
+def eval_depth_consistency(data_pred, data_gt, metric_dict):
+    """Mean absolute depth error of hand and object between rendered depth and GT depth."""
+    from robust_hoi_pipeline.pipeline_utils import load_preprocessed_frame
+    frame_indices = data_pred["valid_frame_indices"]
+    K = data_gt["K"].numpy() if torch.is_tensor(data_gt["K"]) else np.array(data_gt["K"])
+    v3d_c_obj = data_gt.get("v3d_c.object")
+    v3d_c_hand = data_gt.get("v3d_c.right")
+    faces_obj = data_gt.get("faces.object")
+    faces_hand = data_gt.get("faces.right")
+    data_preprocess_dir = Path(data_pred["data_preprocess_dir"]) if "data_preprocess_dir" in data_pred else None
+
+    def _depth_err(pred_mask, pred_depth, gt_depth):
+        valid = pred_mask & (gt_depth > 0) & (pred_depth > 0)
+        return float(np.abs(pred_depth[valid] - gt_depth[valid]).mean()) if valid.any() else float('nan')
+
+    err_obj_list, err_hand_list = [], []
+    for i, fid in enumerate(frame_indices):
+        gt_frame = None
+        if data_preprocess_dir is not None:
+            try:
+                gt_frame = load_preprocessed_frame(data_preprocess_dir, fid)
+            except Exception:
+                pass
+        H, W = (gt_frame["image"].shape[:2] if gt_frame is not None and gt_frame.get("image") is not None else (480, 640))
+
+        if v3d_c_obj is not None and faces_obj is not None and gt_frame is not None:
+            verts = v3d_c_obj[i].numpy() if torch.is_tensor(v3d_c_obj[i]) else np.array(v3d_c_obj[i])
+            pred_mask, pred_depth = _render_to_mask_depth(verts, faces_obj, K, H, W)
+            gt_depth = gt_frame.get("depth")
+            err_obj_list.append(_depth_err(pred_mask, pred_depth, gt_depth) if pred_mask is not None and gt_depth is not None else float('nan'))
+        else:
+            err_obj_list.append(float('nan'))
+
+        if v3d_c_hand is not None and faces_hand is not None and gt_frame is not None:
+            verts = v3d_c_hand[i].numpy() if torch.is_tensor(v3d_c_hand[i]) else np.array(v3d_c_hand[i])
+            pred_mask, pred_depth = _render_to_mask_depth(verts, faces_hand, K, H, W)
+            gt_depth = gt_frame.get("depth")
+            err_hand_list.append(_depth_err(pred_mask, pred_depth, gt_depth) if pred_mask is not None and gt_depth is not None else float('nan'))
+        else:
+            err_hand_list.append(float('nan'))
+
+    metric_dict["depth_err_obj"] = np.array(err_obj_list, dtype=np.float32)
+    metric_dict["depth_err_hand"] = np.array(err_hand_list, dtype=np.float32)
+    return metric_dict
+
+
+def eval_penetration_volume(data_pred, data_gt, metric_dict):
+    """Penetration volume between hand and object meshes (cm^3)."""
+    v3d_c_obj = data_gt.get("v3d_c.object")
+    v3d_c_hand = data_gt.get("v3d_c.right")
+    faces_obj = data_gt.get("faces.object")
+    faces_hand = data_gt.get("faces.right")
+    frame_indices = data_pred["valid_frame_indices"]
+
+    pen_list = []
+    for i in range(len(frame_indices)):
+        if any(x is None for x in [v3d_c_obj, v3d_c_hand, faces_obj, faces_hand]):
+            pen_list.append(float('nan'))
+            continue
+        try:
+            verts_obj = v3d_c_obj[i].numpy() if torch.is_tensor(v3d_c_obj[i]) else np.array(v3d_c_obj[i])
+            verts_hand = v3d_c_hand[i].numpy() if torch.is_tensor(v3d_c_hand[i]) else np.array(v3d_c_hand[i])
+            f_obj = faces_obj.numpy() if torch.is_tensor(faces_obj) else np.array(faces_obj)
+            f_hand = faces_hand.numpy() if torch.is_tensor(faces_hand) else np.array(faces_hand)
+            mesh_obj = trimesh.Trimesh(vertices=verts_obj, faces=f_obj, process=False)
+            mesh_hand = trimesh.Trimesh(vertices=verts_hand, faces=f_hand, process=False)
+            pts_hand, _ = trimesh.sample.sample_surface(mesh_hand, 5000)
+            inside = mesh_obj.contains(pts_hand)
+            if not inside.any():
+                pen_list.append(0.0)
+                continue
+            hand_vol = abs(float(mesh_hand.volume)) if mesh_hand.is_watertight else float('nan')
+            pen_list.append(float('nan') if np.isnan(hand_vol) else (inside.sum() / len(pts_hand)) * hand_vol * 1e6)
+        except Exception:
+            pen_list.append(float('nan'))
+
+    metric_dict["penetration_volume"] = np.array(pen_list, dtype=np.float32)
+    return metric_dict
+
+
 eval_fn_dict = {
     "add": eval_m.eval_add_object,
     "add_s": eval_m.eval_add_s_object,
@@ -30,6 +197,9 @@ eval_fn_dict = {
     "mpjpe_ra_r": eval_m.eval_mpjpe_right,
     "global_mpjpe_r": eval_m.eval_global_mpjpe_right,
     "cd_f_right": eval_m.eval_cd_f_right,
+    "mask_iou": eval_mask_iou,
+    "depth_consistency": eval_depth_consistency,
+    "penetration_volume": eval_penetration_volume,
 }
 
 
@@ -601,6 +771,8 @@ def main():
      sam3d_to_cond_cam, valid_flags) = load_pred_data(results_dir, SAM3D_dir, args.cond_index)
 
     seq_name = results_dir.parent.name
+
+    data_pred["data_preprocess_dir"] = str(SAM3D_dir.parent / "pipeline_preprocess")
 
     # Load hand predictions (before GT filtering so they get filtered together)
     hand_data = load_hand_predictions(SAM3D_dir.parent, args.hand_mode, frame_indices, valid_flags)
