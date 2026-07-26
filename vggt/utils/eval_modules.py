@@ -580,3 +580,412 @@ def eval_ious(data_pred, data_gt, metric_dict):
     ious[not_valid] = np.nan
     metric_dict["ious"] = ious * 100.0
     return metric_dict
+
+
+# ---------------------------------------------------------------------------
+# Rendering-based hand/object metrics (mask IOU, depth consistency,
+# penetration volume). These render GT hand + object meshes via nvdiffrast and
+# compare against per-frame GT masks/depth loaded from the preprocessed data.
+# ---------------------------------------------------------------------------
+_glctx_cache = {}
+
+
+def _get_glctx():
+    if "glctx" not in _glctx_cache:
+        import nvdiffrast.torch as dr
+        _glctx_cache["glctx"] = dr.RasterizeCudaContext()
+    return _glctx_cache["glctx"]
+
+
+# Color codes (0-255) used to tag each part in the merged mesh render.
+_OBJ_COLOR = np.array([0, 0, 255], dtype=np.uint8)      # blue  -> object
+_HAND_COLOR = np.array([128, 0, 128], dtype=np.uint8)   # purple -> hand
+
+
+def _render_merged_mask_depth(verts_obj, faces_obj, verts_hand, faces_hand, K, H, W):
+    """Render object (blue) + hand (purple) as one merged mesh, then split by color.
+
+    Rendering both parts together lets the z-buffer resolve occlusion, so each
+    returned mask/depth only covers the *visible* surface of that part.
+
+    Returns dict with keys ``obj_mask``, ``obj_depth``, ``hand_mask``,
+    ``hand_depth`` (any entry is None if that part was not provided). Returns
+    None on failure.
+    """
+    try:
+        from utils_simba.render import nvdiffrast_render
+
+        verts_list, faces_list, colors_list = [], [], []
+        offset = 0
+        if verts_obj is not None and faces_obj is not None:
+            verts_obj = np.asarray(verts_obj, dtype=np.float32)
+            faces_obj = np.asarray(faces_obj, dtype=np.int64)
+            verts_list.append(verts_obj)
+            faces_list.append(faces_obj + offset)
+            colors_list.append(np.tile(_OBJ_COLOR, (len(verts_obj), 1)))
+            offset += len(verts_obj)
+        if verts_hand is not None and faces_hand is not None:
+            verts_hand = np.asarray(verts_hand, dtype=np.float32)
+            faces_hand = np.asarray(faces_hand, dtype=np.int64)
+            verts_list.append(verts_hand)
+            faces_list.append(faces_hand + offset)
+            colors_list.append(np.tile(_HAND_COLOR, (len(verts_hand), 1)))
+            offset += len(verts_hand)
+        if not verts_list:
+            return None
+
+        merged = trimesh.Trimesh(
+            vertices=np.concatenate(verts_list, axis=0),
+            faces=np.concatenate(faces_list, axis=0),
+            process=False,
+        )
+        merged.visual.vertex_colors = np.concatenate(colors_list, axis=0)
+
+        # Identity ob_in_cvcam since verts are already in camera space
+        ob_in_cvcam = torch.eye(4, dtype=torch.float32, device="cuda").unsqueeze(0)
+        glctx = _get_glctx()
+        color, depth, _ = nvdiffrast_render(
+            K=K, H=H, W=W,
+            ob_in_cvcams=ob_in_cvcam,
+            glctx=glctx,
+            mesh=merged,
+            get_normal=False,
+        )
+        color_np = color[0].cpu().numpy()   # (H, W, 3) in [0, 1]
+        depth_np = depth[0].cpu().numpy()   # (H, W)
+        rendered = depth_np > 0
+
+        # Classify each rendered pixel by nearest reference color.
+        ref_obj = _OBJ_COLOR.astype(np.float32) / 255.0
+        ref_hand = _HAND_COLOR.astype(np.float32) / 255.0
+        d_obj = np.linalg.norm(color_np - ref_obj, axis=-1)
+        d_hand = np.linalg.norm(color_np - ref_hand, axis=-1)
+
+        out = {"obj_mask": None, "obj_depth": None, "hand_mask": None, "hand_depth": None}
+        if verts_obj is not None and faces_obj is not None:
+            obj_mask = rendered & (d_obj <= d_hand)
+            out["obj_mask"] = obj_mask
+            out["obj_depth"] = np.where(obj_mask, depth_np, 0.0).astype(np.float32)
+        if verts_hand is not None and faces_hand is not None:
+            hand_mask = rendered & (d_hand < d_obj)
+            out["hand_mask"] = hand_mask
+            out["hand_depth"] = np.where(hand_mask, depth_np, 0.0).astype(np.float32)
+        return out
+    except Exception:
+        return None
+
+
+def _save_mask_debug(save_dir, fid, tag, pred_mask, gt_mask):
+    """Save pred/gt masks and an overlay (R=pred, G=gt, yellow=overlap) as PNGs."""
+    from pathlib import Path
+    if pred_mask is None or gt_mask is None:
+        return
+    try:
+        import imageio.v2 as imageio
+        save_dir = Path(save_dir)
+        save_dir.mkdir(parents=True, exist_ok=True)
+        p = pred_mask.astype(bool)
+        g = np.asarray(gt_mask).astype(bool)
+        imageio.imwrite(save_dir / f"{fid:04d}_{tag}_pred.png", (p * 255).astype(np.uint8))
+        imageio.imwrite(save_dir / f"{fid:04d}_{tag}_gt.png", (g * 255).astype(np.uint8))
+        overlay = np.zeros((*p.shape, 3), dtype=np.uint8)
+        overlay[..., 0] = p * 255  # pred -> red
+        overlay[..., 1] = g * 255  # gt -> green (overlap -> yellow)
+        imageio.imwrite(save_dir / f"{fid:04d}_{tag}_overlay.png", overlay)
+    except Exception:
+        pass
+
+
+def _backproject_depth(depth, K, mask=None):
+    """Back-project a depth map (HxW, meters) to camera-space points (M, 3)."""
+    H, W = depth.shape[:2]
+    valid = depth > 0
+    if mask is not None:
+        valid = valid & mask.astype(bool)
+    ys, xs = np.where(valid)
+    if len(ys) == 0:
+        return np.zeros((0, 3), dtype=np.float32)
+    z = depth[ys, xs].astype(np.float64)
+    fx, fy = K[0, 0], K[1, 1]
+    cx, cy = K[0, 2], K[1, 2]
+    x = (xs - cx) / fx * z
+    y = (ys - cy) / fy * z
+    return np.stack([x, y, z], axis=-1).astype(np.float32)
+
+
+def _subsample_points(pts, max_pts=20000, seed=0):
+    """Randomly subsample a point cloud so KD-tree queries stay cheap."""
+    if len(pts) <= max_pts:
+        return pts
+    rng = np.random.default_rng(seed)
+    return pts[rng.choice(len(pts), max_pts, replace=False)]
+
+
+def _depth_chamfer_err(pred_depth, pred_mask, gt_depth, gt_mask, K, max_pts=10000):
+    """Symmetric chamfer distance (cm) between depth-backprojected point clouds.
+
+    Both depth maps are lifted to camera space with the same intrinsics, so the
+    metric measures 3D surface disagreement rather than per-pixel depth offset
+    (per-pixel differences are only defined where the two masks overlap and are
+    dominated by silhouette mismatch at object boundaries).
+    """
+    if pred_depth is None or gt_depth is None or K is None:
+        return float('nan')
+    pred_pts = _backproject_depth(np.asarray(pred_depth), K, mask=pred_mask)
+    gt_pts = _backproject_depth(np.asarray(gt_depth), K, mask=gt_mask if gt_mask is not None else pred_mask)
+    if len(pred_pts) == 0 or len(gt_pts) == 0:
+        return float('nan')
+    pred_pts = _subsample_points(pred_pts, max_pts)
+    gt_pts = _subsample_points(gt_pts, max_pts)
+    cd, _, _ = calculate_chamfer_f_scores(pred_pts.astype(np.float64), gt_pts.astype(np.float64))
+    return float(cd)
+
+
+def _save_depth_ply(save_dir, fid, tag, pred_depth, gt_depth, K, mask=None, gt_mask=None):
+    """Back-project pred/gt depth to camera-space point clouds and save as PLY.
+
+    Pred points are colored red, GT points green, for side-by-side inspection.
+    """
+    from pathlib import Path
+    if K is None or (pred_depth is None and gt_depth is None):
+        return
+    try:
+        save_dir = Path(save_dir)
+        save_dir.mkdir(parents=True, exist_ok=True)
+        if pred_depth is not None:
+            pts = _backproject_depth(pred_depth, K, mask=mask)
+            if len(pts) > 0:
+                colors = np.tile(np.array([255, 0, 0], dtype=np.uint8), (len(pts), 1))
+                trimesh.PointCloud(pts, colors=colors).export(save_dir / f"{fid:04d}_{tag}_pred_depth.ply")
+        if gt_depth is not None:
+            pts = _backproject_depth(np.asarray(gt_depth), K, mask=gt_mask if gt_mask is not None else mask)
+            if len(pts) > 0:
+                colors = np.tile(np.array([0, 255, 0], dtype=np.uint8), (len(pts), 1))
+                trimesh.PointCloud(pts, colors=colors).export(save_dir / f"{fid:04d}_{tag}_gt_depth.ply")
+    except Exception:
+        pass
+
+
+def _save_mesh_debug(save_dir, fid, tag, verts, faces, color=None):
+    """Save a mesh (verts in camera space + faces) as a PLY for debug."""
+    from pathlib import Path
+    if verts is None or faces is None:
+        return
+    try:
+        save_dir = Path(save_dir)
+        save_dir.mkdir(parents=True, exist_ok=True)
+        mesh = trimesh.Trimesh(vertices=np.asarray(verts), faces=np.asarray(faces), process=False)
+        if color is not None:
+            mesh.visual.vertex_colors = np.tile(np.asarray(color, dtype=np.uint8), (len(mesh.vertices), 1))
+        mesh.export(save_dir / f"{fid:04d}_{tag}_mesh.ply")
+    except Exception:
+        pass
+
+
+def _save_merged_mesh_debug(save_dir, fid, tag, verts_obj, faces_obj, verts_hand, faces_hand,
+                            obj_color=(0, 0, 255), hand_color=(128, 0, 128)):
+    """Merge object (blue) + hand (purple) meshes into one PLY for debug."""
+    from pathlib import Path
+    try:
+        verts_list, faces_list, colors_list = [], [], []
+        offset = 0
+        if verts_obj is not None and faces_obj is not None:
+            vo = np.asarray(verts_obj, dtype=np.float64)
+            fo = np.asarray(faces_obj, dtype=np.int64)
+            verts_list.append(vo)
+            faces_list.append(fo + offset)
+            colors_list.append(np.tile(np.asarray(obj_color, dtype=np.uint8), (len(vo), 1)))
+            offset += len(vo)
+        if verts_hand is not None and faces_hand is not None:
+            vh = np.asarray(verts_hand, dtype=np.float64)
+            fh = np.asarray(faces_hand, dtype=np.int64)
+            verts_list.append(vh)
+            faces_list.append(fh + offset)
+            colors_list.append(np.tile(np.asarray(hand_color, dtype=np.uint8), (len(vh), 1)))
+            offset += len(vh)
+        if not verts_list:
+            return
+        save_dir = Path(save_dir)
+        save_dir.mkdir(parents=True, exist_ok=True)
+        merged = trimesh.Trimesh(
+            vertices=np.concatenate(verts_list, axis=0),
+            faces=np.concatenate(faces_list, axis=0),
+            process=False,
+        )
+        merged.visual.vertex_colors = np.concatenate(colors_list, axis=0)
+        merged.export(save_dir / f"{fid:04d}_{tag}_merged_mesh.ply")
+    except Exception:
+        pass
+
+
+def eval_mask_iou(data_pred, data_gt, metric_dict):
+    """Mask IOU of hand and object between rendered mask and GT mask."""
+    from pathlib import Path
+    from robust_hoi_pipeline.pipeline_utils import load_preprocessed_frame
+    frame_indices = data_pred["valid_frame_indices"]
+    K = data_gt["K"].numpy() if torch.is_tensor(data_gt["K"]) else np.array(data_gt["K"])
+    v3d_c_obj = data_gt.get("v3d_c.object")
+    v3d_c_hand = data_gt.get("v3d_c.right")
+    faces_obj = data_gt.get("faces.object")
+    faces_hand = data_gt.get("faces.right")
+    data_preprocess_dir = Path(data_pred["data_preprocess_dir"]) if "data_preprocess_dir" in data_pred else None
+    debug_dir = (data_preprocess_dir.parent / "mask_iou_debug") if data_preprocess_dir is not None else None
+
+    def _iou(pred_mask, gt_mask):
+        p, g = pred_mask.astype(bool), gt_mask.astype(bool)
+        inter = (p & g).sum()
+        union = (p | g).sum()
+        return float(inter) / float(union) if union > 0 else float('nan')
+
+    fo = faces_obj.numpy() if torch.is_tensor(faces_obj) else (np.array(faces_obj) if faces_obj is not None else None)
+    fh = faces_hand.numpy() if torch.is_tensor(faces_hand) else (np.array(faces_hand) if faces_hand is not None else None)
+
+    iou_obj_list, iou_hand_list = [], []
+    for i, fid in enumerate(frame_indices):
+        gt_frame = None
+        if data_preprocess_dir is not None:
+            try:
+                gt_frame = load_preprocessed_frame(data_preprocess_dir, fid)
+            except Exception:
+                pass
+        H, W = (gt_frame["image"].shape[:2] if gt_frame is not None and gt_frame.get("image") is not None else (480, 640))
+
+        vo = (v3d_c_obj[i].numpy() if torch.is_tensor(v3d_c_obj[i]) else np.array(v3d_c_obj[i])) if v3d_c_obj is not None else None
+        vh = (v3d_c_hand[i].numpy() if torch.is_tensor(v3d_c_hand[i]) else np.array(v3d_c_hand[i])) if v3d_c_hand is not None else None
+        rendered = _render_merged_mask_depth(vo, fo, vh, fh, K, H, W) if gt_frame is not None else None
+
+        if rendered is not None and rendered["obj_mask"] is not None:
+            gt_mask = gt_frame.get("mask_obj")
+            # if gt_mask is not None:
+            #     _save_mask_debug(debug_dir, int(fid), "obj", rendered["obj_mask"], gt_mask > 0)
+            iou_obj_list.append(_iou(rendered["obj_mask"], gt_mask > 0) if gt_mask is not None else float('nan'))
+        else:
+            iou_obj_list.append(float('nan'))
+
+        if rendered is not None and rendered["hand_mask"] is not None:
+            gt_mask = gt_frame.get("mask_hand")
+            # if gt_mask is not None:
+            #     _save_mask_debug(debug_dir, int(fid), "hand", rendered["hand_mask"], gt_mask > 0)
+            iou_hand_list.append(_iou(rendered["hand_mask"], gt_mask > 0) if gt_mask is not None else float('nan'))
+        else:
+            iou_hand_list.append(float('nan'))
+
+    metric_dict["mask_iou_obj"] = np.array(iou_obj_list, dtype=np.float32)
+    metric_dict["mask_iou_hand"] = np.array(iou_hand_list, dtype=np.float32)
+    return metric_dict
+
+
+def eval_depth_consistency(data_pred, data_gt, metric_dict):
+    """Depth consistency of hand and object as chamfer distance (cm).
+
+    The predicted mesh is rendered to a depth map, both the rendered depth and the
+    GT sensor depth are back-projected to camera-space point clouds (restricted to
+    the predicted / GT mask respectively), and the symmetric chamfer distance
+    between the two clouds is reported.
+    """
+    from pathlib import Path
+    from robust_hoi_pipeline.pipeline_utils import load_preprocessed_frame
+    frame_indices = data_pred["valid_frame_indices"]
+    K = data_gt["K"].numpy() if torch.is_tensor(data_gt["K"]) else np.array(data_gt["K"])
+    gt_v3d_c_obj = data_gt.get("v3d_c.object")
+    gt_v3d_c_hand = data_gt.get("v3d_c.right")
+    faces_obj = data_gt.get("faces.object")
+    faces_hand = data_gt.get("faces.right")
+    data_preprocess_dir = Path(data_pred["data_preprocess_dir"]) if "data_preprocess_dir" in data_pred else None
+    debug_dir = (data_preprocess_dir.parent / "depth_consistency_debug") if data_preprocess_dir is not None else None
+
+    gt_fo = faces_obj.numpy() if torch.is_tensor(faces_obj) else (np.array(faces_obj) if faces_obj is not None else None)
+    gt_fh = faces_hand.numpy() if torch.is_tensor(faces_hand) else (np.array(faces_hand) if faces_hand is not None else None)
+
+    err_obj_list, err_hand_list = [], []
+
+    for i, fid in enumerate(frame_indices):
+        gt_frame = None
+        if data_preprocess_dir is not None:
+            try:
+                gt_frame = load_preprocessed_frame(data_preprocess_dir, fid)
+            except Exception:
+                pass
+        H, W = (gt_frame["image"].shape[:2] if gt_frame is not None and gt_frame.get("image") is not None else (480, 640))
+
+        gt_vo = (gt_v3d_c_obj[i].numpy() if torch.is_tensor(gt_v3d_c_obj[i]) else np.array(gt_v3d_c_obj[i])) if gt_v3d_c_obj is not None else None
+        gt_vh = (gt_v3d_c_hand[i].numpy() if torch.is_tensor(gt_v3d_c_hand[i]) else np.array(gt_v3d_c_hand[i])) if gt_v3d_c_hand is not None else None
+        
+        gt_depth = gt_frame.get("depth") * gt_frame.get("depth_scale") if gt_frame is not None else None
+
+        # Save merged GT (object+hand) and merged predicted ( object+hand) meshes for debug.
+        if gt_frame is not None:
+            # _save_merged_mesh_debug(debug_dir, int(fid), "gt", gt_vo, gt_fo, gt_vh, gt_fh)
+
+            pred_vo_all = data_pred.get("v3d_c.object")
+            pred_vh_all = data_pred.get("v3d_c.right")
+            pred_fo = data_pred.get("faces.object")
+            pred_fh = data_pred.get("faces.right")
+            pred_fo = pred_fo.numpy() if torch.is_tensor(pred_fo) else (np.array(pred_fo) if pred_fo is not None else None)
+            pred_fh = pred_fh.numpy() if torch.is_tensor(pred_fh) else (np.array(pred_fh) if pred_fh is not None else None)
+            pred_vo = None
+            if pred_vo_all is not None and i < len(pred_vo_all):
+                pred_vo = pred_vo_all[i].numpy() if torch.is_tensor(pred_vo_all[i]) else np.asarray(pred_vo_all[i])
+            pred_vh = None
+            if pred_vh_all is not None and i < len(pred_vh_all):
+                pred_vh = pred_vh_all[i].numpy() if torch.is_tensor(pred_vh_all[i]) else np.asarray(pred_vh_all[i])
+            # _save_merged_mesh_debug(debug_dir, int(fid), "pred", pred_vo, pred_fo, pred_vh, pred_fh)
+
+        rendered = _render_merged_mask_depth(pred_vo, pred_fo, pred_vh, pred_fh, K, H, W) if gt_frame is not None else None
+
+        gt_mask_obj = (gt_frame.get("mask_obj") > 0) if (gt_frame is not None and gt_frame.get("mask_obj") is not None) else None
+        gt_mask_hand = (gt_frame.get("mask_hand") > 0) if (gt_frame is not None and gt_frame.get("mask_hand") is not None) else None
+
+        if rendered is not None and rendered["obj_mask"] is not None and gt_depth is not None:
+            # _save_depth_ply(debug_dir, int(fid), "obj", rendered["obj_depth"], gt_depth, K,
+            #                 mask=rendered["obj_mask"], gt_mask=gt_mask_obj)
+            err_obj_list.append(_depth_chamfer_err(
+                rendered["obj_depth"], rendered["obj_mask"], gt_depth, gt_mask_obj, K))
+        else:
+            err_obj_list.append(float('nan'))
+
+        if rendered is not None and rendered["hand_mask"] is not None and gt_depth is not None:
+            # _save_depth_ply(debug_dir, int(fid), "hand", rendered["hand_depth"], gt_depth, K,
+            #                 mask=rendered["hand_mask"], gt_mask=gt_mask_hand)
+            err_hand_list.append(_depth_chamfer_err(
+                rendered["hand_depth"], rendered["hand_mask"], gt_depth, gt_mask_hand, K))
+        else:
+            err_hand_list.append(float('nan'))
+
+    metric_dict["depth_err_obj"] = np.array(err_obj_list, dtype=np.float32)
+    metric_dict["depth_err_hand"] = np.array(err_hand_list, dtype=np.float32)
+    return metric_dict
+
+
+def eval_penetration_volume(data_pred, data_gt, metric_dict):
+    """Penetration volume between hand and object meshes (cm^3)."""
+    v3d_c_obj = data_gt.get("v3d_c.object")
+    v3d_c_hand = data_gt.get("v3d_c.right")
+    faces_obj = data_gt.get("faces.object")
+    faces_hand = data_gt.get("faces.right")
+    frame_indices = data_pred["valid_frame_indices"]
+
+    pen_list = []
+    for i in range(len(frame_indices)):
+        if any(x is None for x in [v3d_c_obj, v3d_c_hand, faces_obj, faces_hand]):
+            pen_list.append(float('nan'))
+            continue
+        try:
+            verts_obj = v3d_c_obj[i].numpy() if torch.is_tensor(v3d_c_obj[i]) else np.array(v3d_c_obj[i])
+            verts_hand = v3d_c_hand[i].numpy() if torch.is_tensor(v3d_c_hand[i]) else np.array(v3d_c_hand[i])
+            f_obj = faces_obj.numpy() if torch.is_tensor(faces_obj) else np.array(faces_obj)
+            f_hand = faces_hand.numpy() if torch.is_tensor(faces_hand) else np.array(faces_hand)
+            mesh_obj = trimesh.Trimesh(vertices=verts_obj, faces=f_obj, process=False)
+            mesh_hand = trimesh.Trimesh(vertices=verts_hand, faces=f_hand, process=False)
+            pts_hand, _ = trimesh.sample.sample_surface(mesh_hand, 5000)
+            inside = mesh_obj.contains(pts_hand)
+            if not inside.any():
+                pen_list.append(0.0)
+                continue
+            hand_vol = abs(float(mesh_hand.volume)) if mesh_hand.is_watertight else float('nan')
+            pen_list.append(float('nan') if np.isnan(hand_vol) else (inside.sum() / len(pts_hand)) * hand_vol * 1e6)
+        except Exception:
+            pen_list.append(float('nan'))
+
+    metric_dict["penetration_volume"] = np.array(pen_list, dtype=np.float32)
+    return metric_dict
