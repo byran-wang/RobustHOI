@@ -30,9 +30,9 @@ eval_fn_dict = {
     "mpjpe_ra_r": eval_m.eval_mpjpe_right,
     "global_mpjpe_r": eval_m.eval_global_mpjpe_right,
     "cd_f_right": eval_m.eval_cd_f_right,
-    "mask_iou": eval_mask_iou,
-    "depth_consistency": eval_depth_consistency,
-    "penetration_volume": eval_penetration_volume,
+    "mask_iou": eval_m.eval_mask_iou,
+    "depth_consistency": eval_m.eval_depth_consistency,
+    # "penetration_volume": eval_m.eval_penetration_volume,
 }
 
 
