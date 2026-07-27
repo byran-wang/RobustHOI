@@ -30,8 +30,8 @@ eval_fn_dict = {
     "mpjpe_ra_r": eval_m.eval_mpjpe_right,
     "cd_f_right": eval_m.eval_cd_f_right,
     "mask_iou": eval_m.eval_mask_iou,
-    "depth_consistency": eval_m.eval_depth_consistency,
-    # "penetration_volume": eval_m.eval_penetration_volume,
+    "depth_consistency": eval_m.eval_depth_consistency, # cm
+    "penetration_volume": eval_m.eval_penetration_volume, # cm^3
 }
 
 
@@ -671,7 +671,7 @@ def main():
     print("------------------")
     print("Involving the following eval_fn:")
     active_eval_fns = {}
-    hand_eval_keys = {"mpjpe_ra_r", "cd_f_right"}
+    hand_eval_keys = {"mpjpe_ra_r", "cd_f_right", "penetration_volume"}
     for eval_fn_name, eval_fn in eval_fn_dict.items():
         if eval_fn_name in hand_eval_keys and "j3d_ra.right" not in data_pred:
             print(f"  {eval_fn_name} (SKIPPED - no hand data)")

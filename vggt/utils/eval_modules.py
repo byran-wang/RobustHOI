@@ -818,6 +818,35 @@ def _save_merged_mesh_debug(save_dir, fid, tag, verts_obj, faces_obj, verts_hand
         pass
 
 
+def _save_penetration_debug(save_dir, fid, mesh_hand, mesh_obj, pts, inside):
+    """Save the sealed hand + object meshes and the volume samples for one frame.
+
+    Writes three files: the merged hand/object mesh, and the sampled interior
+    points split into penetrating (red, inside the object) and free (green) so the
+    reported volume can be eyeballed against the geometry.
+    """
+    from pathlib import Path
+    if save_dir is None:
+        return
+    try:
+        save_dir = Path(save_dir)
+        save_dir.mkdir(parents=True, exist_ok=True)
+        _save_merged_mesh_debug(
+            save_dir, fid, "pen",
+            mesh_obj.vertices, mesh_obj.faces,
+            mesh_hand.vertices, mesh_hand.faces,
+        )
+        if pts is not None and len(pts) > 0:
+            for tag, sel, color in (("inside", inside, (255, 0, 0)), ("outside", ~inside, (0, 255, 0))):
+                sub = pts[sel]
+                if len(sub) == 0:
+                    continue
+                colors = np.tile(np.array(color, dtype=np.uint8), (len(sub), 1))
+                trimesh.PointCloud(sub, colors=colors).export(save_dir / f"{fid:04d}_pen_{tag}_pts.ply")
+    except Exception:
+        pass
+
+
 def eval_mask_iou(data_pred, data_gt, metric_dict):
     """Mask IOU of hand and object between rendered mask and GT mask."""
     from pathlib import Path
@@ -957,33 +986,89 @@ def eval_depth_consistency(data_pred, data_gt, metric_dict):
     return metric_dict
 
 
+def _seal_hand_mesh(verts, faces):
+    """Seal the open MANO wrist so the hand mesh becomes watertight.
+
+    MANO returns 778 verts / 1538 faces with an open wrist ring, which makes both
+    `Trimesh.volume` and `Trimesh.contains` ill-defined. Sealing appends the wrist
+    ring centroid as vertex 778 plus 16 fan faces (-> 779 verts / 1554 faces).
+    Already-sealed or non-MANO meshes are returned unchanged.
+    """
+    if verts is None or faces is None:
+        return verts, faces
+    verts = np.asarray(verts, dtype=np.float64)
+    faces = np.asarray(faces)
+    if verts.shape[0] != 778:
+        return verts, faces
+    from common.body_models import seal_mano_mesh_np
+    sealed_verts, sealed_faces = seal_mano_mesh_np(verts[None], faces, is_rhand=True)
+    return sealed_verts[0], sealed_faces
+
+
+def _sample_volume_points(mesh, n_target, max_tries=6):
+    """Rejection-sample at least ~n_target points uniformly inside a watertight mesh."""
+    collected, tries = [], 0
+    n_have = 0
+    while n_have < n_target and tries < max_tries:
+        pts = trimesh.sample.volume_mesh(mesh, n_target)
+        tries += 1
+        if len(pts) == 0:
+            continue
+        collected.append(pts)
+        n_have += len(pts)
+    if not collected:
+        return np.zeros((0, 3), dtype=np.float64)
+    return np.concatenate(collected, axis=0)[:max(n_target, 1)]
+
+
 def eval_penetration_volume(data_pred, data_gt, metric_dict):
-    """Penetration volume between hand and object meshes (cm^3)."""
-    v3d_c_obj = data_gt.get("v3d_c.object")
-    v3d_c_hand = data_gt.get("v3d_c.right")
-    faces_obj = data_gt.get("faces.object")
-    faces_hand = data_gt.get("faces.right")
+    """Penetration volume (cm^3) between the predicted hand and the predicted object.
+
+    The predicted MANO hand is sealed to a watertight mesh, points are uniformly
+    rejection-sampled inside the hand volume, and the fraction of them that also
+    falls inside the predicted object mesh scales the hand volume into the
+    intersection volume. 0 means no penetration.
+    """
+    from pathlib import Path
+    v3d_c_obj = data_pred.get("v3d_c.object")
+    v3d_c_hand = data_pred.get("v3d_c.right")
+    faces_obj = data_pred.get("faces.object")
+    faces_hand = data_pred.get("faces.right")
     frame_indices = data_pred["valid_frame_indices"]
+    n_samples = 5000
+
+    data_preprocess_dir = Path(data_pred["data_preprocess_dir"]) if "data_preprocess_dir" in data_pred else None
+    debug_dir = data_preprocess_dir.parent / "penetration_debug"
+
+    missing = any(x is None for x in [v3d_c_obj, v3d_c_hand, faces_obj, faces_hand])
 
     pen_list = []
     for i in range(len(frame_indices)):
-        if any(x is None for x in [v3d_c_obj, v3d_c_hand, faces_obj, faces_hand]):
+        if missing or i >= len(v3d_c_obj) or i >= len(v3d_c_hand):
             pen_list.append(float('nan'))
             continue
         try:
-            verts_obj = v3d_c_obj[i].numpy() if torch.is_tensor(v3d_c_obj[i]) else np.array(v3d_c_obj[i])
-            verts_hand = v3d_c_hand[i].numpy() if torch.is_tensor(v3d_c_hand[i]) else np.array(v3d_c_hand[i])
-            f_obj = faces_obj.numpy() if torch.is_tensor(faces_obj) else np.array(faces_obj)
-            f_hand = faces_hand.numpy() if torch.is_tensor(faces_hand) else np.array(faces_hand)
-            mesh_obj = trimesh.Trimesh(vertices=verts_obj, faces=f_obj, process=False)
+            verts_obj = np.asarray(_to_numpy(v3d_c_obj[i]), dtype=np.float64)
+            verts_hand = np.asarray(_to_numpy(v3d_c_hand[i]), dtype=np.float64)
+            f_obj = np.asarray(_to_numpy(faces_obj))
+            f_hand = np.asarray(_to_numpy(faces_hand))
+
+            verts_hand, f_hand = _seal_hand_mesh(verts_hand, f_hand)
+
             mesh_hand = trimesh.Trimesh(vertices=verts_hand, faces=f_hand, process=False)
-            pts_hand, _ = trimesh.sample.sample_surface(mesh_hand, 5000)
-            inside = mesh_obj.contains(pts_hand)
-            if not inside.any():
-                pen_list.append(0.0)
+            mesh_obj = trimesh.Trimesh(vertices=verts_obj, faces=f_obj, process=False)
+            if not mesh_hand.is_watertight:
+                pen_list.append(float('nan'))
                 continue
-            hand_vol = abs(float(mesh_hand.volume)) if mesh_hand.is_watertight else float('nan')
-            pen_list.append(float('nan') if np.isnan(hand_vol) else (inside.sum() / len(pts_hand)) * hand_vol * 1e6)
+
+            hand_vol = abs(float(mesh_hand.volume))
+            pts_hand = _sample_volume_points(mesh_hand, n_samples)
+            if len(pts_hand) == 0:
+                pen_list.append(float('nan'))
+                continue
+            inside = mesh_obj.contains(pts_hand)
+            # _save_penetration_debug(debug_dir, int(frame_indices[i]), mesh_hand, mesh_obj, pts_hand, inside)
+            pen_list.append(float(inside.mean() * hand_vol * 1e6))
         except Exception:
             pen_list.append(float('nan'))
 
